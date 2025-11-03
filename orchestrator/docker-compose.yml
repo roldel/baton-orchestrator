@@ -1,0 +1,80 @@
+services:
+
+
+
+  nginx:
+    image: nginx:alpine
+    container_name: ingress-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+
+      # Enabled site configs (symlinked or copied by your enable-site script)
+      - TBD/nginx-configurations:/etc/nginx/conf.d:ro
+      # Certificates shared with Certbot
+      - TBD/certs:/etc/letsencrypt:ro
+      # Webroot for ACME HTTP-01 challenges
+      - TBD/certbot-webroot:/var/www/certbot:ro
+      
+    depends_on:
+      webhook:
+        condition: service_healthy
+
+    networks:
+      - internal_proxy_pass_network
+
+
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    volumes:
+      # Shared cert storage and ACME webroot
+      - TBD/certs:/etc/letsencrypt
+      - TBD/certbot-webroot:/var/www/certbot
+
+
+
+
+
+  webhook:
+    image: yourregistry/mini-webhook:latest
+    container_name: webhook
+    restart: unless-stopped
+    environment:
+      - PORT=8000
+      # Directory shared with host where redeploy requests are dropped
+      - REDEPLOY_OUTBOX=/shared/requests
+    volumes:
+      - ./webhook-redeploy-instruct/:/signal-to-host
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+
+
+
+  webhook:
+    build:
+      context: ./webhook
+    container_name: webhook
+    restart: unless-stopped
+    env_file:
+      - ./webhook/.env
+    volumes:
+      - ./webhook-redeploy-instruct/:/signal-to-host
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PORT:-5000}/health || exit 1"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+
+
+
+networks:
+  internal_proxy_pass_network:
+    external: true

@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# Ignore everything in projects/
+projects/*
+# But keep the metadata template file
+!projects/project-metadata-template.yml
+!template-docker-compose.yml
+# Keep the directory itself tracked (if it would otherwise disappear)
+!projects/.gitkeep

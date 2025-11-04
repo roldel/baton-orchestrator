@@ -12,8 +12,11 @@ services:
 
     volumes:
 
+      # Map static + media files repo
+      - /shared-filed/:/shared-files/
+
       # Enabled site configs (symlinked or copied by your enable-site script)
-      - TBD/nginx-configurations:/etc/nginx/conf.d:ro
+      - server-confs/:/etc/nginx/conf.d:ro
       # Certificates shared with Certbot
       - TBD/certs:/etc/letsencrypt:ro
       # Webroot for ACME HTTP-01 challenges

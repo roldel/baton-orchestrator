@@ -214,3 +214,25 @@ projects/*
 !template-docker-compose.yml
 # Keep the directory itself tracked (if it would otherwise disappear)
 !projects/.gitkeep
+
+# Let's Encrypt certs & account keys (sensitive!)
+/orchestrator/data/certs/
+/orchestrator/data/certs/**/*
+
+# ACME webroot (challenge files; not sensitive but noisy)
+/orchestrator/data/certbot-webroot/
+/orchestrator/data/certbot-webroot/**/*
+
+# Any accidental archives/backups of certs
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.pkcs12
+backup-*.tar
+*.tar.gz
+*.zip

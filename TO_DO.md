@@ -1,14 +1,15 @@
-- Define and structure project metadata
-
 Orchestrator:
 
-- add nginx proxyass to webhook in nginx main conf file (or custom .env string)
-
-- Fine tune orchestrator docker-compose :
-- Define shared files locations
-- Fine tune webhook service
-- Test, up and run orchestrator docker compose
+- implement project with proper domain name for testing
+- purge cmd, should it remnove the whole project ? Or only onfig files, certs and co
+- finish the deploy process with certs checks/issual/.renewal/server reload
+- fine tune command list and adjust with tools
+- clean up tools and commands
 
 - Create host level project deploy command
-- Project removal + clean up script
 - Inotify on host + hook redeployment process
+- create env and logic for webhook pipeline
+
+- host cronjob and inotify
+
+- add nginx proxyass to webhook in nginx main conf file (or custom .env string)

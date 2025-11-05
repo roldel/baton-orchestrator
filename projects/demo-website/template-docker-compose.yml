@@ -1,0 +1,27 @@
+services :
+  
+  service-exposing-application-server:
+    
+    #...
+    #...
+
+    volume:
+      - /shared-files/${MAIN_DOMAIN_NAME}/static:/static:rw
+      - /shared-files/${MAIN_DOMAIN_NAME}/media:/media:rw
+
+    # Add this internal network for proxy pass to nginx server
+    networks:
+      internal_proxy_pass_network:
+        aliases:
+          - <repo-name>-<service-name>
+
+
+  other-services:
+    # Etc...
+
+
+
+# And add network definition in footer
+networks:
+  internal_proxy_pass_network:
+    external: true

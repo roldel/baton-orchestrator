@@ -210,8 +210,7 @@ __marimo__/
 # Ignore everything in projects/
 projects/*
 # But keep the metadata template file
-!projects/project-metadata-template.yml
-!template-docker-compose.yml
+!projects/demo-website/
 # Keep the directory itself tracked (if it would otherwise disappear)
 !projects/.gitkeep
 

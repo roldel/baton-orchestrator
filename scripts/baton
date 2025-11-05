@@ -1,15 +1,24 @@
 #!/bin/sh
+# baton - CLI entrypoint
+# Alpine-safe and repo-root aware
+
 set -eu
 
-if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+# Resolve real path of this script (not the symlink)
+if [ -L "$0" ]; then
   BATON_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 else
   BATON_PATH="$0"
 fi
 
+# baton lives in repo/scripts → repo root is one level up
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$BATON_PATH")/.." && pwd)
+
+# Export BASE_DIR for env-setup.sh
+export BASE_DIR="$REPO_ROOT"
 ENV_SETUP="$REPO_ROOT/env-setup.sh"
 [ -f "$ENV_SETUP" ] || { echo "ERROR: env-setup.sh not found at $ENV_SETUP" >&2; exit 1; }
+
 . "$ENV_SETUP"
 
 CMD="${1:-}"

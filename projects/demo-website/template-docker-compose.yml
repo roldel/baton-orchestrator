@@ -6,14 +6,14 @@ services :
     #...
 
     volume:
-      - /shared-files/${MAIN_DOMAIN_NAME}/static:/static:rw
-      - /shared-files/${MAIN_DOMAIN_NAME}/media:/media:rw
+      - /shared-files/${DOMAIN_NAME}/static:/static:rw
+      - /shared-files/${DOMAIN_NAME}/media:/media:rw
 
     # Add this internal network for proxy pass to nginx server
     networks:
       internal_proxy_pass_network:
         aliases:
-          - <repo-name>-<service-name>
+          - ${DOCKER_NETWORK_SERVICE_ALIAS}
 
 
   other-services:

@@ -1,27 +1,69 @@
 #!/bin/sh
-# Run once as root (Alpine)
+# Run once as root on Alpine (OpenRC)
 set -eu
 
 BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 echo "Setting up baton-orchestrator in: $BASE_DIR"
 
-# (Optional) install deps on Alpine; ignore errors if not Alpine
-apk add --no-cache docker docker-cli-compose git gettext >/dev/null 2>&1 || true
+#-------------#
+# Dependencies
+#-------------#
+if command -v apk >/dev/null 2>&1; then
+  echo "Installing required packages via apk..."
+  # docker + compose v2, git, gettext (envsubst), cron daemon, inotify tools
+  apk update >/dev/null
+  apk add --no-cache \
+    docker \
+    docker-cli-compose \
+    git \
+    gettext \
+    dcron \
+    inotify-tools >/dev/null
 
-mkdir -p "$BASE_DIR/orchestrator/data/certs" \
-         "$BASE_DIR/orchestrator/data/certbot-webroot" \
-         "$BASE_DIR/orchestrator/servers-confs" \
-         "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
-         /shared-files \
-         /usr/local/bin
+  # Enable & start Docker (OpenRC)
+  rc-update add docker default >/dev/null || true
+  rc-service docker start || true
 
-if ! docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-  echo "Creating Docker network: internal_proxy_pass_network"
-  docker network create internal_proxy_pass_network
+  # Enable & start cron (service name: crond)
+  rc-update add crond default >/dev/null || true
+  rc-service crond start || true
 else
-  echo "Network already exists"
+  echo "apk not found; skipping package install (this script targets Alpine)."
 fi
 
+#----------------#
+# Host filesystem
+#----------------#
+mkdir -p \
+  "$BASE_DIR/orchestrator/data/certs" \
+  "$BASE_DIR/orchestrator/data/certbot-webroot" \
+  "$BASE_DIR/orchestrator/servers-confs" \
+  "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
+  /shared-files \
+  /usr/local/bin
+
+#--------------------#
+# Docker prerequisites
+#--------------------#
+if command -v docker >/dev/null 2>&1; then
+  if ! docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
+    echo "Creating Docker network: internal_proxy_pass_network"
+    docker network create internal_proxy_pass_network
+  else
+    echo "Network already exists"
+  fi
+
+  # Optional: verify compose v2 is available
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "WARNING: 'docker compose' not available. Ensure docker-cli-compose is installed."
+  fi
+else
+  echo "WARNING: Docker not found on PATH. Install/enable Docker before deploying."
+fi
+
+#-------------------#
+# Baton CLI symlink
+#-------------------#
 BATON_SRC="$BASE_DIR/scripts/baton"
 BATON_DEST="/usr/local/bin/baton"
 

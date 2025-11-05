@@ -1,16 +1,50 @@
 #!/bin/sh
-# scripts/baton
+# scripts/baton - Main CLI entrypoint
+# Resolves symlink → finds real scripts/ dir
+
 set -e
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-. "$SCRIPT_DIR/env-setup.sh"
+# Resolve real path of this script (follow symlink)
+if [ -L "$0" ]; then
+    REAL_PATH=$(readlink -f "$0")
+else
+    REAL_PATH="$0"
+fi
 
-CMD=$1; shift || true
+REAL_DIR=$(CDPATH= cd -- "$(dirname -- "$REAL_PATH")" && pwd)
+
+# Source env-setup
+ENV_SETUP="$REAL_DIR/../env-setup.sh"
+if [ ! -f "$ENV_SETUP" ]; then
+    echo "ERROR: env-setup.sh not found at $ENV_SETUP" >&2
+    echo "Check baton-orchestrator installation." >&2
+    exit 1
+fi
+
+. "$ENV_SETUP"
+
+# Route command
+CMD="$1"
+shift || true
 
 case "$CMD" in
-    deploy|update-server-conf|ssl-renew-now|stand-down) ;;
-    help|--help|-h) echo "Usage: baton <command> <project> [args]"; exit 0 ;;
-    *) echo "Unknown command: $CMD"; exit 1 ;;
-esac
+    deploy|update-server-conf|ssl-renew-now|stand-down)
+        exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"
+        ;;
+    help|--help|-h)
+        cat << EOF
+baton-orchestrator CLI
 
-exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"
+Commands:
+  baton deploy <project>           Deploy site
+  baton stand-down <project>       Remove site
+  baton help                       This help
+EOF
+        exit 0
+        ;;
+    *)
+        echo "Unknown command: $CMD" >&2
+        echo "Use 'baton help'" >&2
+        exit 1
+        ;;
+esac

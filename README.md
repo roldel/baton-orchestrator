@@ -8,7 +8,7 @@
 
 ```sh
 
-git clone https://github.com/your/baton-orchestrator.git /opt/baton-orchestrator
+git clone https://github.com/roldel/baton-orchestrator.git /opt/baton-orchestrator
 cd /opt/baton-orchestrator
 chmod +x scripts/*.sh scripts/cmd/*.sh scripts/tools/*.sh
 sudo ./scripts/setup.sh

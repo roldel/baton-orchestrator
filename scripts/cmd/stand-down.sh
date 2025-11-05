@@ -7,12 +7,12 @@ proj="${1:-}"
 [ -n "$proj" ] || { echo "Usage: baton stand-down <project>"; exit 1; }
 
 eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$proj/server.conf")"
-conf="$CONF_DIR/${MAIN_DOMAIN_NAME}.conf"
+conf="$CONF_DIR/${DOMAIN_NAME}.conf"
 if [ -f "$conf" ]; then
   ts=$(date +%Y%m%d-%H%M%S)
   mv "$conf" "$conf.disabled.$ts"
   docker exec ingress-nginx nginx -s reload || true
-  echo "Disabled site: $MAIN_DOMAIN_NAME"
+  echo "Disabled site: $DOMAIN_NAME"
 else
-  echo "No live conf for $MAIN_DOMAIN_NAME"
+  echo "No live conf for $DOMAIN_NAME"
 fi

@@ -1,55 +1,31 @@
 #!/bin/sh
-# scripts/baton - Main CLI entrypoint
-# Works without sudo, assumes /usr/local/bin is writable by root
+set -eu
 
-set -e
-
-# Resolve real path of baton (follow symlink)
-if [ -L "$0" ]; then
-    REAL_BATON=$(readlink -f "$0")
+if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+  BATON_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 else
-    REAL_BATON="$0"
+  BATON_PATH="$0"
 fi
 
-# Go up to repo root: scripts/ → repo root
-REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$REAL_BATON")/.." && pwd)
-
-# Source env-setup from root
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$BATON_PATH")/.." && pwd)
 ENV_SETUP="$REPO_ROOT/env-setup.sh"
-if [ ! -f "$ENV_SETUP" ]; then
-    echo "ERROR: env-setup.sh not found at $ENV_SETUP" >&2
-    echo "Check baton-orchestrator installation." >&2
-    exit 1
-fi
-
+[ -f "$ENV_SETUP" ] || { echo "ERROR: env-setup.sh not found at $ENV_SETUP" >&2; exit 1; }
 . "$ENV_SETUP"
 
-# Set SCRIPT_DIR for tools
-SCRIPT_DIR="$REPO_ROOT/scripts"
-
-# Route command
-CMD="$1"
+CMD="${1:-}"
 shift || true
 
 case "$CMD" in
-    deploy|ssl-issue|stand-down|update-server-conf|ssl-renew-now)
-        exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"
-        ;;
-    help|--help|-h)
-        cat << 'EOF'
-baton-orchestrator CLI
-
-Commands:
-  baton deploy <project>           Deploy nginx config
-  baton ssl-issue <project>        Issue Let's Encrypt cert
-  baton stand-down <project>       Remove site
-  baton help                       This help
-EOF
-        exit 0
-        ;;
-    *)
-        echo "Unknown command: $CMD" >&2
-        echo "Use 'baton help'" >&2
-        exit 1
-        ;;
+  deploy|ssl-issue|stand-down)
+    exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"
+    ;;
+  help|--help|-h|"")
+    echo "Usage: baton <deploy|ssl-issue|stand-down> <project>"
+    exit 0
+    ;;
+  *)
+    echo "Unknown command: $CMD"
+    echo "Use 'baton help'"
+    exit 1
+    ;;
 esac

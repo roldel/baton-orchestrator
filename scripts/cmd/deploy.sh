@@ -1,35 +1,43 @@
 #!/bin/sh
+# scripts/cmd/deploy.sh
 set -e
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-. "$SCRIPT_DIR/../env-setup.sh"
+# Always use the environment baton already set up
+if [ -z "${BASE_DIR:-}" ]; then
+  echo "ERROR: BASE_DIR not set. Run via 'baton deploy <project>'." >&2
+  exit 1
+fi
 
-proj="$1"
+. "$BASE_DIR/env-setup.sh"
+
+proj="${1:-}"
 [ -z "$proj" ] && { echo "Usage: baton deploy <project>"; exit 1; }
 
+echo "Starting deploy for project: $proj"
+
 echo "Validating project..."
-. "$SCRIPT_DIR/../tools/validate-project.sh"
+. "$SCRIPT_DIR/tools/validate-project.sh"
 validate_project "$proj" && echo "Project valid"
 
 echo "Parsing domains..."
-eval "$("$SCRIPT_DIR/../tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$proj/server.conf")"
+eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$proj/server.conf")"
 export MAIN_DOMAIN="$MAIN_DOMAIN_NAME"
 export ALL_DOMAINS="$DOMAIN_ALIASES"
 
 echo "Rendering config..."
-. "$SCRIPT_DIR/../tools/render-server-conf.sh"
+. "$SCRIPT_DIR/tools/render-server-conf.sh"
 rendered_path=$(render_conf "$proj" "$MAIN_DOMAIN" $ALL_DOMAINS)
 
 echo "Staging config..."
-. "$SCRIPT_DIR/../tools/stage-config.sh"
+. "$SCRIPT_DIR/tools/stage-config.sh"
 tmp_conf=$(stage_config "$rendered_path" "$MAIN_DOMAIN")
 
 echo "Testing with nginx..."
-. "$SCRIPT_DIR/../tools/nginx-test.sh"
+. "$SCRIPT_DIR/tools/nginx-test.sh"
 nginx_test "$tmp_conf" && echo "Config test PASSED"
 
 echo "Committing to live..."
-. "$SCRIPT_DIR/../tools/commit-config.sh"
+. "$SCRIPT_DIR/tools/commit-config.sh"
 commit_config "$tmp_conf" "$MAIN_DOMAIN"
 
 echo ""

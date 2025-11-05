@@ -1,5 +1,7 @@
 #!/bin/sh
-. "$(dirname "$0")/../env-setup.sh"
+set -eu
+[ -n "${BASE_DIR:-}" ] || { echo "Run via baton"; exit 1; }
+. "$BASE_DIR/env-setup.sh"
 
 validate_project() {
   proj="$1"
@@ -14,6 +16,5 @@ validate_project() {
     echo "ERROR: Missing server.conf in $proj_dir" >&2
     return 1
   fi
-
   return 0
 }

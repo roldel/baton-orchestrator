@@ -1,14 +1,17 @@
 #!/bin/sh
-# scripts/setup.sh - Run once as root (no sudo on Alpine)
-
+# Run once as root (Alpine)
 set -eu
 
 BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 echo "Setting up baton-orchestrator in: $BASE_DIR"
 
+# (Optional) install deps on Alpine; ignore errors if not Alpine
+apk add --no-cache docker docker-cli-compose git gettext >/dev/null 2>&1 || true
+
 mkdir -p "$BASE_DIR/orchestrator/data/certs" \
          "$BASE_DIR/orchestrator/data/certbot-webroot" \
          "$BASE_DIR/orchestrator/servers-confs" \
+         "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
          /shared-files \
          /usr/local/bin
 
@@ -25,9 +28,6 @@ BATON_DEST="/usr/local/bin/baton"
 echo "Installing baton → $BATON_DEST"
 ln -sf "$BATON_SRC" "$BATON_DEST"
 chmod +x "$BATON_SRC"
-
-# Create directory used by webhook bind mount (see compose)
-mkdir -p "$BASE_DIR/orchestrator/webhook-redeploy-instruct"
 
 echo
 echo "Setup complete!"

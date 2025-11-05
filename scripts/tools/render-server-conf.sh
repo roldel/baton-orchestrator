@@ -1,5 +1,7 @@
 #!/bin/sh
-. "$(dirname "$0")/../env-setup.sh"
+set -eu
+[ -n "${BASE_DIR:-}" ] || { echo "Run via baton"; exit 1; }
+. "$BASE_DIR/env-setup.sh"
 
 render_conf() {
   proj="$1"
@@ -23,5 +25,5 @@ render_conf() {
   envsubst '$MAIN_DOMAIN_NAME $DOMAIN_ALIASES $DOCKER_COMPOSE_SERVICE_NETWORK_ALIAS $APP_PORT' \
     < "$src" > "$dst"
 
-  echo "$dst"
+  printf '%s\n' "$dst"
 }

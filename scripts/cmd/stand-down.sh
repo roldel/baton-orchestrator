@@ -1,21 +1,18 @@
 #!/bin/sh
-set -e
-. "$(dirname "$0")/../env-setup.sh"
+set -eu
+[ -n "${BASE_DIR:-}" ] || { echo "Run via 'baton stand-down <project>'"; exit 1; }
+. "$BASE_DIR/env-setup.sh"
 
-proj=$1
-[ -z "$proj" ] && { echo "Usage: baton stand-down <project>"; exit 1; }
+proj="${1:-}"
+[ -n "$proj" ] || { echo "Usage: baton stand-down <project>"; exit 1; }
 
-# Remove conf + cert (optional) + reload
-conf_file=$(find "$CONF_DIR" -name "*.conf" -exec grep -l " $proj" {} + | head -n1)
-if [ -n "$conf_file" ]; then
-    rm -f "$conf_file"
-    echo "Removed $conf_file"
+eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$proj/server.conf")"
+conf="$CONF_DIR/${MAIN_DOMAIN_NAME}.conf"
+if [ -f "$conf" ]; then
+  ts=$(date +%Y%m%d-%H%M%S)
+  mv "$conf" "$conf.disabled.$ts"
+  docker exec ingress-nginx nginx -s reload || true
+  echo "Disabled site: $MAIN_DOMAIN_NAME"
+else
+  echo "No live conf for $MAIN_DOMAIN_NAME"
 fi
-
-. "$SCRIPT_DIR/../tools/nginx-test.sh"
-nginx_test || true   # ignore error if no sites left
-
-. "$SCRIPT_DIR/../tools/reload-nginx.sh"
-reload_nginx
-
-echo "$proj stood down"

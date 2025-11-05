@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
-. "$(dirname "$0")/../env-setup.sh"
+[ -n "${BASE_DIR:-}" ] || { echo "Run via 'baton ssl-issue <project>'"; exit 1; }
+. "$BASE_DIR/env-setup.sh"
 
-proj="${1:?Usage: certbot-issuance.sh <project> [--staging] [--email you@domain] }"
+proj="${1:-}"
+[ -n "$proj" ] || { echo "Usage: baton ssl-issue <project> [--staging] [--email you@domain]"; exit 1; }
 shift || true
 
 STAGING=0
@@ -16,12 +18,12 @@ while [ $# -gt 0 ]; do
   shift || true
 done
 
+# Parse domains from the provided server.conf (no rendering)
 eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$proj/server.conf")"
 domain_args=""
 for d in "$MAIN_DOMAIN_NAME" $DOMAIN_ALIASES; do
   [ -n "$d" ] && domain_args="$domain_args -d $d"
 done
-
 [ -n "$domain_args" ] || { echo "No domains parsed"; exit 1; }
 
 staging_flag=""

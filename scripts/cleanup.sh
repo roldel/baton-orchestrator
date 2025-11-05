@@ -1,6 +1,8 @@
 #!/bin/sh
+# Irreversible cleanup; run as root
 set -eu
 
+# Resolve repo root
 if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
   REAL_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 else
@@ -17,24 +19,31 @@ read -r confirm
 
 COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
 
+# Stop stack if possible
 if [ -f "$COMPOSE_FILE" ] && docker info >/dev/null 2>&1; then
   echo "Stopping orchestrator..."
   docker compose -f "$COMPOSE_FILE" down -v || true
 fi
 
-BATON_DEST="/usr/local/bin/baton"
-[ -e "$BATON_DEST" ] && { rm -f "$BATON_DEST"; echo "Removed $BATON_DEST"; }
+# Remove baton from PATH variants
+for p in /usr/local/bin/baton /usr/local/sbin/baton /usr/bin/baton; do
+  [ -e "$p" ] && { rm -f "$p"; echo "Removed $p"; }
+done
+hash -r 2>/dev/null || true
 
+# Remove Docker network
 if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
   echo "Removing network: internal_proxy_pass_network"
   docker network rm internal_proxy_pass_network || true
 fi
 
+# Remove repo data dirs
 echo "Removing data directories..."
 rm -rf "$BASE_DIR/orchestrator/data" \
        "$BASE_DIR/orchestrator/servers-confs" \
        "$BASE_DIR/orchestrator/webhook-redeploy-instruct" 2>/dev/null || true
 
+# Remove shared files
 if [ -d /shared-files ]; then
   echo "Removing /shared-files (all static/media)"
   rm -rf /shared-files/*

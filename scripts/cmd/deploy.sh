@@ -1,13 +1,8 @@
 #!/bin/sh
-# scripts/cmd/deploy.sh
+# scripts/cmd/deploy.sh — use server.conf as-is (no render)
 set -e
 
-# Always use the environment baton already set up
-if [ -z "${BASE_DIR:-}" ]; then
-  echo "ERROR: BASE_DIR not set. Run via 'baton deploy <project>'." >&2
-  exit 1
-fi
-
+[ -n "${BASE_DIR:-}" ] || { echo "ERROR: BASE_DIR not set. Run via 'baton deploy <project>'." >&2; exit 1; }
 . "$BASE_DIR/env-setup.sh"
 
 proj="${1:-}"
@@ -24,13 +19,12 @@ eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$PROJECTS_DIR/$pro
 export MAIN_DOMAIN="$MAIN_DOMAIN_NAME"
 export ALL_DOMAINS="$DOMAIN_ALIASES"
 
-echo "Rendering config..."
-. "$SCRIPT_DIR/tools/render-server-conf.sh"
-rendered_path=$(render_conf "$proj" "$MAIN_DOMAIN" $ALL_DOMAINS)
+# Use the project's server.conf directly
+src_conf="$PROJECTS_DIR/$proj/server.conf"
 
 echo "Staging config..."
 . "$SCRIPT_DIR/tools/stage-config.sh"
-tmp_conf=$(stage_config "$rendered_path" "$MAIN_DOMAIN")
+tmp_conf=$(stage_config "$src_conf" "$MAIN_DOMAIN")
 
 echo "Testing with nginx..."
 . "$SCRIPT_DIR/tools/nginx-test.sh"
@@ -40,7 +34,7 @@ echo "Committing to live..."
 . "$SCRIPT_DIR/tools/commit-config.sh"
 commit_config "$tmp_conf" "$MAIN_DOMAIN"
 
-echo ""
+echo
 echo "DEPLOY SUCCESSFUL"
 echo "Config: $CONF_DIR/${MAIN_DOMAIN}.conf"
 echo "Next: Run 'baton ssl-issue $proj' when ready"

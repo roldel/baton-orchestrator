@@ -1,0 +1,16 @@
+#!/bin/sh
+# scripts/baton
+set -e
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+. "$SCRIPT_DIR/env-setup.sh"
+
+CMD=$1; shift || true
+
+case "$CMD" in
+    deploy|update-server-conf|ssl-renew-now|stand-down) ;;
+    help|--help|-h) echo "Usage: baton <command> <project> [args]"; exit 0 ;;
+    *) echo "Unknown command: $CMD"; exit 1 ;;
+esac
+
+exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"

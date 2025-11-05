@@ -22,9 +22,9 @@ services:
       # Webroot for ACME HTTP-01 challenges
       - ./data/certbot-webroot:/var/www/certbot:ro
       
-    depends_on:
-      webhook:
-        condition: service_healthy
+    #depends_on:
+    #  webhook:
+    #    condition: service_healthy
 
     networks:
       - internal_proxy_pass_network

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Render server.conf using .env values (envsubst)
+# Render server.conf using .env values
 set -eu
 [ -n "${BASE_DIR:-}" ] || { echo "Run via baton"; exit 1; }
 . "$BASE_DIR/env-setup.sh"
@@ -13,13 +13,10 @@ render_conf() {
   dst="$CONF_DIR/.${domain}.conf.rendered.$$"
   env_file="$PROJECTS_DIR/$proj/.env"
 
-  # Load .env to populate env vars for substitution
   load_dotenv "$env_file"
 
-  # Variables that may appear in templates
-  #   ${DOMAIN_NAME} ${DOMAIN_ALIASES} ${MAIN_DOMAIN_NAME}
-  #   ${DOCKER_NETWORK_SERVICE_ALIAS} ${APP_PORT}
-  envsubst '$DOMAIN_NAME $DOMAIN_ALIASES $MAIN_DOMAIN_NAME $DOCKER_NETWORK_SERVICE_ALIAS $APP_PORT' \
+  # Use DOMAIN_NAME for everything; DOMAIN_ALIASES is space-separated
+  envsubst '$DOMAIN_NAME $DOMAIN_ALIASES $DOCKER_NETWORK_SERVICE_ALIAS $APP_PORT' \
     < "$src" > "$dst"
 
   printf '%s\n' "$dst"

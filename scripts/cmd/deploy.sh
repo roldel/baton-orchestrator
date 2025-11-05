@@ -1,26 +1,23 @@
 #!/bin/sh
-# use .env + envsubst to render, then stage/test/commit
+# Render from .env and deploy (DOMAIN_NAME is canonical)
 set -e
 [ -n "${BASE_DIR:-}" ] || { echo "ERROR: BASE_DIR not set. Run via 'baton deploy <project>'." >&2; exit 1; }
 . "$BASE_DIR/env-setup.sh"
 . "$SCRIPT_DIR/tools/load-dotenv.sh"
 
-proj="${1:-}"
-[ -z "$proj" ] && { echo "Usage: baton deploy <project>"; exit 1; }
+proj="${1:-}"; [ -n "$proj" ] || { echo "Usage: baton deploy <project>"; exit 1; }
 
 echo "Starting deploy for project: $proj"
 
-echo "Validating project..."
 . "$SCRIPT_DIR/tools/validate-project.sh"
 validate_project "$proj" && echo "Project valid"
 
-# After validate_project, .env is loaded and MAIN_DOMAIN_NAME/DOMAIN_ALIASES set
-MAIN_DOMAIN="$MAIN_DOMAIN_NAME"
-ALL_DOMAINS="$DOMAIN_ALIASES"
+# .env has been validated and loaded inside validate_project
+env_file="$PROJECTS_DIR/$proj/.env"; load_dotenv "$env_file" >/dev/null
 
-echo "Env: MAIN_DOMAIN=$MAIN_DOMAIN  ALIASES='${ALL_DOMAINS}'  APP_PORT=$APP_PORT  ALIAS=$DOCKER_NETWORK_SERVICE_ALIAS"
+MAIN_DOMAIN="$DOMAIN_NAME"
 
-echo "Rendering config with .env..."
+echo "Rendering config with .env (DOMAIN_NAME=$DOMAIN_NAME ALIASES='$DOMAIN_ALIASES' APP_PORT=$APP_PORT)..."
 . "$SCRIPT_DIR/tools/render-server-conf.sh"
 rendered_path=$(render_conf "$proj" "$MAIN_DOMAIN")
 

@@ -19,11 +19,11 @@ CMD="${1:-}"
 shift || true
 
 case "$CMD" in
-  deploy|ssl-issue|ssl-renew-now|update-server-conf|stand-down)
+  deploy|ssl-issue|ssl-renew-now|update-server-conf|stand-down|purge)
     exec "$SCRIPT_DIR/cmd/${CMD}.sh" "$@"
     ;;
   help|--help|-h|"")
-    echo "Usage: baton <deploy|ssl-issue|ssl-renew-now|update-server-conf|stand-down> <project>"
+    echo "Usage: baton <deploy|ssl-issue|ssl-renew-now|update-server-conf|stand-down|purge> <project> [options]"
     exit 0
     ;;
   *)

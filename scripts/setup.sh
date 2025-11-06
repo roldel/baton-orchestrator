@@ -2,7 +2,8 @@
 # Run once as root on Alpine (OpenRC)
 set -eu
 
-BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${BASE_DIR:=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+
 echo "Setting up baton-orchestrator in: $BASE_DIR"
 
 #-------------#

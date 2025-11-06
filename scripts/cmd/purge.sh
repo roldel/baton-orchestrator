@@ -1,6 +1,16 @@
 #!/bin/sh
-# Purge a project: nginx confs, certs, shared files, optional project dir
-# Usage: baton purge <project> [--yes] [--dry-run] [--keep-project] [--keep-shared] [--keep-certs]
+# Purge a project: remove nginx confs (live/disabled/tmp/backups) and certificates.
+# Optionally delete shared files and/or the project repo directory after prompts.
+#
+# Usage:
+#   baton purge <project> [--yes] [--dry-run]
+#                      [--delete-shared | --keep-shared]
+#                      [--delete-project | --keep-project]
+#
+# Notes:
+#   - ALWAYS removes: Nginx conf files for the domain + Let's Encrypt certs for the domain
+#   - Shared files deletion is OPTIONAL and PROMPTED (unless flag provided)
+#   - Project repo deletion is OPTIONAL and PROMPTED (unless flag provided)
 set -eu
 [ -n "${BASE_DIR:-}" ] || { echo "Run via 'baton purge <project>'"; exit 1; }
 . "$BASE_DIR/env-setup.sh"
@@ -8,21 +18,21 @@ set -eu
 
 # -------- Args --------
 proj="${1:-}"; shift || true
-[ -n "$proj" ] || { echo "Usage: baton purge <project> [--yes] [--dry-run] [--keep-project] [--keep-shared] [--keep-certs]"; exit 1; }
+[ -n "$proj" ] || { echo "Usage: baton purge <project> [--yes] [--dry-run] [--delete-shared|--keep-shared] [--delete-project|--keep-project]"; exit 1; }
 
 YES=0
 DRY_RUN=0
-KEEP_PROJECT=0
-KEEP_SHARED=0
-KEEP_CERTS=0
+DELETE_SHARED_FLAG=""   # "", "delete", or "keep"
+DELETE_PROJECT_FLAG=""  # "", "delete", or "keep"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes|-y) YES=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    --keep-project) KEEP_PROJECT=1 ;;
-    --keep-shared)  KEEP_SHARED=1 ;;
-    --keep-certs)   KEEP_CERTS=1 ;;
+    --delete-shared)  DELETE_SHARED_FLAG="delete" ;;
+    --keep-shared)    DELETE_SHARED_FLAG="keep" ;;
+    --delete-project) DELETE_PROJECT_FLAG="delete" ;;
+    --keep-project)   DELETE_PROJECT_FLAG="keep" ;;
     *) echo "Unknown flag: $1" >&2; exit 1 ;;
   esac
   shift || true
@@ -37,7 +47,6 @@ env_file="$proj_dir/.env"
 [ -f "$conf_file" ] || { echo "ERROR: Missing server.conf in $proj_dir" >&2; exit 1; }
 
 if [ -f "$env_file" ]; then
-  # Preferred: from .env
   load_dotenv "$env_file"
   DOMAIN="$DOMAIN_NAME"
 else
@@ -49,7 +58,6 @@ fi
 
 # -------- Targets --------
 live_conf="$CONF_DIR/${DOMAIN}.conf"
-# safety: only remove files under $CONF_DIR matching domain patterns
 conf_globs="
 $CONF_DIR/${DOMAIN}.conf
 $CONF_DIR/${DOMAIN}.conf.disabled.*
@@ -59,7 +67,7 @@ $CONF_DIR/.${DOMAIN}.conf.rendered.*
 "
 
 shared_root="${SHARED_FILES%/}"
-shared_dir="$shared_root/$DOMAIN"            # may contain /static and /media underneath
+shared_dir="$shared_root/$DOMAIN"  # e.g., /shared-files/example.com (contains static/, media/)
 
 certs_root="${CERTS_DIR%/}"
 cert_live="$certs_root/live/$DOMAIN"
@@ -76,15 +84,6 @@ rm_path() {
   fi
 }
 
-mv_path() {
-  src="$1"; dst="$2"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[dry-run] mv -- $src $dst"
-  else
-    mv -- "$src" "$dst"
-  fi
-}
-
 reload_nginx() {
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[dry-run] docker exec ingress-nginx nginx -s reload"
@@ -93,22 +92,20 @@ reload_nginx() {
   fi
 }
 
-# -------- Prompt --------
-echo "About to PURGE project: $proj"
+# -------- Summary & main confirmation --------
+echo "About to PURGE config & certificates for project: $proj"
 echo "  DOMAIN                : $DOMAIN"
-echo "  Nginx conf (primary)  : $live_conf"
-echo "  Conf patterns         :"
+echo "  Nginx conf root       : $CONF_DIR"
+echo "  Will remove patterns  :"
 printf "    - %s\n" $(echo "$conf_globs")
-echo "  Shared files path     : $shared_dir"
 echo "  Certs live/archive    : $cert_live | $cert_arch"
 echo "  Cert renewal file     : $cert_renw"
-echo "  Keep project dir      : $([ $KEEP_PROJECT -eq 1 ] && echo yes || echo no)"
-echo "  Keep shared files     : $([ $KEEP_SHARED -eq 1 ] && echo yes || echo no)"
-echo "  Keep certs            : $([ $KEEP_CERTS -eq 1 ] && echo yes || echo no)"
+echo "  Shared files path     : $shared_dir (separate prompt)"
+echo "  Project directory     : $proj_dir (separate prompt)"
 echo "  Dry run               : $([ $DRY_RUN -eq 1 ] && echo yes || echo no)"
 
 if [ "$YES" -ne 1 ]; then
-  printf "Type YES to continue: "
+  printf "Type YES to remove the above Nginx configs & certificates: "
   read -r ans
   [ "$ans" = "YES" ] || { echo "Aborted."; exit 1; }
 fi
@@ -116,7 +113,6 @@ fi
 # -------- Remove nginx confs (live + backups + temps) --------
 echo "Removing Nginx conf(s)..."
 for g in $conf_globs; do
-  # Expand glob manually
   for f in $g; do
     [ -e "$f" ] || continue
     rm_path "$f"
@@ -127,34 +123,63 @@ done
 echo "Reloading Nginx..."
 reload_nginx
 
-# -------- Remove shared files (unless kept) --------
-if [ "$KEEP_SHARED" -eq 0 ]; then
-  if [ -d "$shared_dir" ]; then
-    echo "Removing shared files: $shared_dir"
-    rm_path "$shared_dir"
-  else
-    echo "Shared files not present: $shared_dir"
-  fi
+# -------- Remove certificates --------
+echo "Removing certificates for $DOMAIN..."
+[ -d "$cert_live" ] && rm_path "$cert_live" || echo "No live/ dir for $DOMAIN"
+[ -d "$cert_arch" ] && rm_path "$cert_arch" || echo "No archive/ dir for $DOMAIN"
+[ -f "$cert_renw" ] && rm_path "$cert_renw" || echo "No renewal file for $DOMAIN"
+
+# -------- Prompt for shared files deletion (intermediate prompt) --------
+DELETE_SHARED=0
+case "$DELETE_SHARED_FLAG" in
+  delete) DELETE_SHARED=1 ;;
+  keep)   DELETE_SHARED=0 ;;
+  "")
+    if [ -d "$shared_dir" ]; then
+      printf "Also delete shared static/media under '%s'? [y/N]: " "$shared_dir"
+      read -r del_shared
+      case "$del_shared" in
+        y|Y|yes|YES) DELETE_SHARED=1 ;;
+        *) DELETE_SHARED=0 ;;
+      esac
+    else
+      echo "Shared files not present: $shared_dir"
+      DELETE_SHARED=0
+    fi
+    ;;
+esac
+
+if [ "$DELETE_SHARED" -eq 1 ]; then
+  echo "Deleting shared files: $shared_dir"
+  rm_path "$shared_dir"
 else
   echo "Keeping shared files: $shared_dir"
 fi
 
-# -------- Remove certificates (unless kept) --------
-if [ "$KEEP_CERTS" -eq 0 ]; then
-  echo "Removing certificates for $DOMAIN..."
-  [ -d "$cert_live" ] && rm_path "$cert_live" || echo "No live/ dir for $DOMAIN"
-  [ -d "$cert_arch" ] && rm_path "$cert_arch" || echo "No archive/ dir for $DOMAIN"
-  [ -f "$cert_renw" ] && rm_path "$cert_renw" || echo "No renewal file for $DOMAIN"
-else
-  echo "Keeping certificates for $DOMAIN"
-fi
+# -------- Prompt for project directory deletion (final prompt) --------
+DELETE_PROJECT=0
+case "$DELETE_PROJECT_FLAG" in
+  delete) DELETE_PROJECT=1 ;;
+  keep)   DELETE_PROJECT=0 ;;
+  "")
+    printf "Also delete the project repository directory?\n  %s\nConfirm delete of '%s'? [y/N]: " "$proj_dir" "$proj_dir"
+    read -r del_proj
+    case "$del_proj" in
+      y|Y|yes|YES) DELETE_PROJECT=1 ;;
+      *) DELETE_PROJECT=0 ;;
+    esac
+    ;;
+esac
 
-# -------- Remove project dir (unless kept) --------
-if [ "$KEEP_PROJECT" -eq 0 ]; then
-  echo "Removing project directory: $proj_dir"
-  rm_path "$proj_dir"
+if [ "$DELETE_PROJECT" -eq 1 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] rm -rf -- $proj_dir"
+  else
+    rm -rf -- "$proj_dir"
+  fi
+  echo "Project directory removed: $proj_dir"
 else
-  echo "Keeping project directory: $proj_dir"
+  echo "Project directory kept: $proj_dir"
 fi
 
 echo

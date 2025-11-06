@@ -1,7 +1,6 @@
 Orchestrator:
 
 - implement project with proper domain name for testing
-- purge cmd, should it remnove the whole project ? Or only onfig files, certs and co
 - finish the deploy process with certs checks/issual/.renewal/server reload
 - fine tune command list and adjust with tools
 - clean up tools and commands

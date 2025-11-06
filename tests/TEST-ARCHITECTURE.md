@@ -47,7 +47,7 @@ making it directly usable in CI/CD workflows.
 
 Example test script:
 
-\`\`\`sh
+```sh
 #!/bin/sh
 set -eu
 
@@ -60,7 +60,7 @@ else
   echo "[test_name] ❌ Failed"
   exit 1
 fi
-\`\`\`
+```
 
 Each test should be **self-contained**, easy to read, and return a clear success or failure state.
 
@@ -90,13 +90,13 @@ Each test should be **self-contained**, easy to read, and return a clear success
 
 Run all tests from anywhere in the repo:
 
-\`\`\`bash
+```bash
 ./tests/run-tests.sh
-\`\`\`
+```
 
 Expected output example:
 
-\`\`\`
+```
 🔍 Running all test scripts in ./tests (recursively)
 ▶️  Running: ./tests/test_sanity_check.sh
 [test_sanity_check] Checking that 1 + 1 equals 2...
@@ -106,7 +106,7 @@ Expected output example:
 ✅ Passed: 1
 ❌ Failed: 0
 🎉 All tests passed!
-\`\`\`
+```
 
 ---
 

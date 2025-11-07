@@ -1,73 +1,52 @@
+# scripts/tools/cert-state.sh
 #!/bin/sh
-# Determine the certificate state for DOMAIN_NAME (+ DOMAIN_ALIASES).
-# Exit codes:
-#   0 = OK (exists, not expiring soon, SANs cover all names)
-#   2 = missing
-#   3 = expiring soon (<= DAYS)
-#   4 = SAN mismatch
-# Prints a brief reason to stdout.
-
 set -eu
+
+proj="${1:-}"; [ -n "$proj" ] || { echo "Usage: $0 <project> [--days N]"; exit 1; }
+shift
+
+DAYS=21
+while [ $# -gt 0 ]; do
+  case "$1" in --days) shift; DAYS="${1:-21}"; esac; shift
+done
 
 [ -n "${BASE_DIR:-}" ] || { echo "BASE_DIR not set"; exit 1; }
 . "$BASE_DIR/env-setup.sh"
 . "$SCRIPT_DIR/tools/load-dotenv.sh"
 
-proj="${1:-}"; [ -n "$proj" ] || { echo "Usage: cert-state.sh <project> [--days 21]"; exit 1; }
-shift || true
-
-DAYS=21
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --days) shift; DAYS="${1:-21}" ;;
-    *) echo "Unknown flag: $1" >&2; exit 1 ;;
-  esac
-  shift || true
-done
-
 env_file="$PROJECTS_DIR/$proj/.env"
 load_dotenv "$env_file" >/dev/null
 
-DOMAIN="${DOMAIN_NAME:-}"
+DOMAIN="${DOMAIN_NAME:-}"; [ -n "$DOMAIN" ] || { echo "DOMAIN_NAME missing"; exit 1; }
 ALIASES="${DOMAIN_ALIASES:-}"
-[ -n "$DOMAIN" ] || { echo "DOMAIN_NAME missing in $env_file"; exit 1; }
 
-compose="-f $ORCHESTRATOR_DIR/docker-compose.yml"
+compose="docker compose -f $ORCHESTRATOR_DIR/docker-compose.yml"
 
-exists() {
-  docker compose $compose exec -T certbot sh -c "[ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]"
-}
+# === ENSURE certbot container is running ===
+if ! $compose ps certbot | grep -q "Up"; then
+  echo "Starting certbot container..."
+  $compose up -d certbot
+  sleep 2
+fi
 
+# === Helper commands inside certbot container ===
+exists() { $compose exec -T certbot test -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; }
 not_expiring() {
-  secs=$(( DAYS * 24 * 3600 ))
-  docker compose $compose exec -T certbot openssl x509 \
-    -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" \
-    -noout -checkend "$secs" >/dev/null 2>&1
+  secs=$((DAYS * 86400))
+  $compose exec -T certbot openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -noout -checkend "$secs"
 }
-
 get_sans() {
-  docker compose $compose exec -T certbot sh -c "
-    openssl x509 -in /etc/letsencrypt/live/$DOMAIN/fullchain.pem -noout -text \
-      | awk '/Subject Alternative Name/{flag=1;next} /X509v3/{flag=0} flag' \
-      | tr ',' '\n' | sed 's/^[[:space:]]*//'
-  " | sed 's/^DNS://'
+  $compose exec -T certbot openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -noout -text \
+    | awk '/DNS:/{gsub(/DNS:/, ""); print}' | tr -d ' ,'
 }
 
-if ! exists; then
-  echo "missing"
-  exit 2
-fi
+if ! exists; then echo "missing"; exit 2; fi
+if ! not_expiring; then echo "expiring_soon"; exit 3; fi
 
-if ! not_expiring; then
-  echo "expiring_soon"
-  exit 3
-fi
-
-# Check SAN coverage
 if [ -n "$ALIASES" ]; then
-  sans="$(get_sans | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  sans="$(get_sans)"
   for name in $DOMAIN $ALIASES; do
-    echo "$sans" | grep -qw "$name" || { echo "sans_missing:$name"; exit 4; }
+    echo "$sans" | grep -Fx "$name" > /dev/null || { echo "sans_missing:$name"; exit 4; }
   done
 fi
 

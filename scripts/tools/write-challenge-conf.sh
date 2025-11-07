@@ -1,12 +1,10 @@
-#!/bin/sh
 # scripts/tools/write-challenge-conf.sh
-# Generate challenge-only server block
-# Usage: write-challenge-conf.sh domain1 [domain2 ...]
-
+#!/bin/sh
 set -eu
 
-[ $# -ge 1 ] || { echo "Usage: $(basename "$0") <domain> [aliases...]"; exit 1; }
+[ $# -ge 1 ] || { echo "Usage: $0 <domain> [alias1 alias2 ...]"; exit 1; }
 
+# All arguments are domains
 domains="$*"
 
 cat <<EOF

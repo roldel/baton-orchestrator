@@ -1,0 +1,1 @@
+caddy validate --config temp/demo-website.conf --adapter caddyfile

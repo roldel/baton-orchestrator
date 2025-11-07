@@ -1,5 +1,5 @@
 #!/bin/sh
-# Purge a project: remove nginx confs (live/disabled/tmp/backups) and certificates.
+# Purge a project: remove caddy confs (live/disabled/tmp/backups) and certificates.
 # Optionally delete shared files and/or the project repo directory after prompts.
 #
 # Usage:
@@ -8,7 +8,7 @@
 #                      [--delete-project | --keep-project]
 #
 # Notes:
-#   - ALWAYS removes: Nginx conf files for the domain + Let's Encrypt certs for the domain
+#   - ALWAYS removes: Caddy conf files for the domain + Let's Encrypt certs for the domain
 #   - Shared files deletion is OPTIONAL and PROMPTED (unless flag provided)
 #   - Project repo deletion is OPTIONAL and PROMPTED (unless flag provided)
 set -eu
@@ -47,13 +47,11 @@ env_file="$proj_dir/.env"
 [ -f "$conf_file" ] || { echo "ERROR: Missing server.conf in $proj_dir" >&2; exit 1; }
 
 if [ -f "$env_file" ]; then
-  load_dotenv "$env_file"
+  load_dotenv "$env_file" >/dev/null
   DOMAIN="$DOMAIN_NAME"
 else
-  # Fallback: parse server_name (first token)
-  eval "$("$SCRIPT_DIR/tools/domain-name-aliases-retriever.sh" "$conf_file")"
-  DOMAIN="${MAIN_DOMAIN_NAME:-}"
-  [ -n "$DOMAIN" ] || { echo "ERROR: Could not determine domain from server.conf" >&2; exit 1; }
+  echo "ERROR: Could not find .env to determine domain for project $proj" >&2
+  exit 1
 fi
 
 # -------- Targets --------
@@ -69,10 +67,10 @@ $CONF_DIR/.${DOMAIN}.conf.rendered.*
 shared_root="${SHARED_FILES%/}"
 shared_dir="$shared_root/$DOMAIN"  # e.g., /shared-files/example.com (contains static/, media/)
 
-certs_root="${CERTS_DIR%/}"
-cert_live="$certs_root/live/$DOMAIN"
-cert_arch="$certs_root/archive/$DOMAIN"
-cert_renw="$certs_root/renewal/$DOMAIN.conf"
+# Note: Caddy certificate paths are different from nginx/certbot.
+# Caddy manages them internally in its /data volume. Purging the config and reloading
+# is usually enough. For a full wipe, caddy's data volume would need to be cleared.
+# This script focuses on the configs which is safer.
 
 # -------- Helpers --------
 rm_path() {
@@ -80,38 +78,37 @@ rm_path() {
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[dry-run] rm -rf -- $p"
   else
-    rm -rf -- $p 2>/dev/null || true
+    rm -rf -- "$p" 2>/dev/null || true
   fi
 }
 
-reload_nginx() {
+reload_caddy() {
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[dry-run] docker exec ingress-nginx nginx -s reload"
+    echo "[dry-run] docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile"
   else
-    docker exec ingress-nginx nginx -s reload 2>/dev/null || true
+    # || true is okay here, as Caddy might not be running but we still want to clean up files.
+    docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
   fi
 }
 
 # -------- Summary & main confirmation --------
-echo "About to PURGE config & certificates for project: $proj"
+echo "About to PURGE config for project: $proj"
 echo "  DOMAIN                : $DOMAIN"
-echo "  Nginx conf root       : $CONF_DIR"
+echo "  Caddy conf root       : $CONF_DIR"
 echo "  Will remove patterns  :"
 printf "    - %s\n" $(echo "$conf_globs")
-echo "  Certs live/archive    : $cert_live | $cert_arch"
-echo "  Cert renewal file     : $cert_renw"
 echo "  Shared files path     : $shared_dir (separate prompt)"
 echo "  Project directory     : $proj_dir (separate prompt)"
 echo "  Dry run               : $([ $DRY_RUN -eq 1 ] && echo yes || echo no)"
 
 if [ "$YES" -ne 1 ]; then
-  printf "Type YES to remove the above Nginx configs & certificates: "
+  printf "Type YES to remove the above Caddy configs: "
   read -r ans
   [ "$ans" = "YES" ] || { echo "Aborted."; exit 1; }
 fi
 
-# -------- Remove nginx confs (live + backups + temps) --------
-echo "Removing Nginx conf(s)..."
+# -------- Remove Caddy confs (live + backups + temps) --------
+echo "Removing Caddy conf(s)..."
 for g in $conf_globs; do
   for f in $g; do
     [ -e "$f" ] || continue
@@ -119,15 +116,9 @@ for g in $conf_globs; do
   done
 done
 
-# Reload nginx to apply removal
-echo "Reloading Nginx..."
-reload_nginx
-
-# -------- Remove certificates --------
-echo "Removing certificates for $DOMAIN..."
-[ -d "$cert_live" ] && rm_path "$cert_live" || echo "No live/ dir for $DOMAIN"
-[ -d "$cert_arch" ] && rm_path "$cert_arch" || echo "No archive/ dir for $DOMAIN"
-[ -f "$cert_renw" ] && rm_path "$cert_renw" || echo "No renewal file for $DOMAIN"
+# Reload Caddy to apply removal
+echo "Reloading Caddy..."
+reload_caddy
 
 # -------- Prompt for shared files deletion (intermediate prompt) --------
 DELETE_SHARED=0

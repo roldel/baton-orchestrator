@@ -17,14 +17,16 @@ conf_dir="$CONF_DIR"
 [ -f "$env_file" ] || { echo "ERROR: Missing .env in $proj_dir (see .env.sample)" >&2; exit 1; }
 
 # Load env to get DOMAIN_NAME
-load_dotenv "$env_file"
+load_dotenv "$env_file" >/dev/null
 
 conf="$conf_dir/${DOMAIN_NAME}.conf"
 if [ -f "$conf" ]; then
   ts=$(date +%Y%m%d-%H%M%S)
+  echo "Disabling config for $DOMAIN_NAME..."
   mv "$conf" "$conf.disabled.$ts"
-  docker exec ingress-nginx nginx -s reload || true
+  echo "Reloading Caddy..."
+  docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile
   echo "Disabled site: $DOMAIN_NAME"
 else
-  echo "No live conf for $DOMAIN_NAME"
+  echo "No live config found for $DOMAIN_NAME, nothing to do."
 fi

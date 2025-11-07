@@ -34,6 +34,11 @@ caddy_test "$tmp"
 commit_config "$tmp" "$DOMAIN_NAME"
 
 # Step 7: Reload Caddy
-docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile || true
-
-echo "Deployed and reloaded Caddy for $DOMAIN_NAME"
+echo "Reloading Caddy to apply new configuration..."
+if docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile; then
+  echo "Successfully deployed and reloaded Caddy for $DOMAIN_NAME"
+else
+  echo "ERROR: Caddy reload failed. Check Caddy container logs for details:" >&2
+  echo "  docker logs ingress-caddy" >&2
+  exit 1
+fi

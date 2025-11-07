@@ -1,19 +1,15 @@
 #!/bin/sh
+# scripts/tools/commit-config.sh
 set -eu
-[ -n "${BASE_DIR:-}" ] || { echo "Run via baton"; exit 1; }
-. "$BASE_DIR/env-setup.sh"
 
 commit_config() {
-  tmp="$1"
+  tmp_file="$1"
   domain="$2"
-  final="$CONF_DIR/${domain}.conf"
+  final_file="$CONF_DIR/${domain}.conf"
 
-  if [ -f "$final" ]; then
-    backup="$final.bak.$(date +%Y%m%d-%H%M%S)"
-    cp "$final" "$backup"
-    echo "Backed up → $backup"
-  fi
+  # Backup old config
+  [ -f "$final_file" ] && mv "$final_file" "$final_file.bak.$(date +%Y%m%d-%H%M%S)"
 
-  mv "$tmp" "$final"
-  echo "Live → $final"
+  mv "$tmp_file" "$final_file"
+  echo "Config committed: $final_file"
 }

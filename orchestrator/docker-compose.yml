@@ -1,46 +1,27 @@
 services:
 
-  nginx:
-    image: nginx:alpine
-    container_name: ingress-nginx
+caddy:
+    image: caddy:2-alpine
+    container_name: ingress-caddy
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-
+      - "443:443/udp" # For HTTP/3
     volumes:
-
-      # Map static + media files repo
+      # Main Caddyfile entrypoint
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Directory for project-specific configs
+      - ./servers-confs:/etc/caddy/conf.d:ro
+      # Caddy's persistent data (certs, etc.)
+      - ./data/caddy_data:/data
+      # Shared static/media files
       - /shared-files/:/shared-files/:ro
-
-      # Enabled site configs (symlinked or copied by your enable-site script)
-      - ./servers-confs/:/etc/nginx/conf.d:ro
-      
-      # Certificates shared with Certbot
-      - ./data/certs:/etc/letsencrypt:ro
-
-      # Webroot for ACME HTTP-01 challenges
-      - ./data/certbot-webroot:/var/www/certbot:ro
-      
-    #depends_on:
-    #  webhook:
-    #    condition: service_healthy
-
     networks:
       - internal_proxy_pass_network
 
 
-
-  certbot:
-    image: certbot/certbot:latest
-    container_name: certbot
-    volumes:
-      # Shared cert storage and ACME webroot
-      - ./data/certs:/etc/letsencrypt:rw
-      - ./data/certbot-webroot:/var/www/certbot:rw
-
-
-  webhook:
+webhook:
     build:
       context: ./webhook
     container_name: webhook

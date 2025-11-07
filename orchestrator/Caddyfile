@@ -1,0 +1,19 @@
+{
+	# Global options (adjust if you want email for ACME, logging, etc.)
+	# email {env.DOMAIN_ADMIN_EMAIL}
+	# Optional: enable admin API on a unix socket (safer than TCP)
+	admin off
+	# Optional: default storage location (already volume-mapped to ./data/caddy_data)
+	# storage file_system {
+	#   root /data
+	# }
+	# Optional: log config
+	# logging {
+	#   output stdout
+	#   format console
+	#   level INFO
+	# }
+}
+
+# Import all per-project configs
+import /etc/caddy/conf.d/*.conf

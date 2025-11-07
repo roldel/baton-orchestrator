@@ -10,7 +10,7 @@ PROJECT="${1:-}"
 
 TEMPLATE="projects/$PROJECT/server.conf"
 ENV_FILE="projects/$PROJECT/.env"
-OUT_DIR="temp"
+OUT_DIR="orchestrator/server-confs"
 OUT_FILE="$OUT_DIR/$PROJECT.conf"
 
 echo "[render-server-conf] Project: $PROJECT"

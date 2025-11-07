@@ -6,3 +6,5 @@
 ./render-server-conf.sh
 
 ./caddy-conf-check.sh
+
+./caddy-reload.sh

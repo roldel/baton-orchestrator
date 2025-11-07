@@ -33,6 +33,11 @@ echo "Committing to live..."
 . "$SCRIPT_DIR/tools/commit-config.sh"
 commit_config "$tmp_conf" "$MAIN_DOMAIN"
 
+# NEW: Ensure the project's Docker Compose stack is up (no templates)
+echo "Verifying application stack..."
+. "$SCRIPT_DIR/tools/ensure-compose-up.sh"
+ensure_compose_up "$proj"
+
 echo
 echo "DEPLOY SUCCESSFUL"
 echo "Config: $CONF_DIR/${MAIN_DOMAIN}.conf"

@@ -17,7 +17,7 @@ load_dotenv() {
 
   : "${DOMAIN_NAME:?DOMAIN_NAME is required in .env}"
   : "${DOCKER_NETWORK_SERVICE_ALIAS:?DOCKER_NETWORK_SERVICE_ALIAS is required in .env}"
-  : "${SERVER_APP_PORT:?SERVER_APP_PORT is required in .env}"
+  : "${APP_PORT:?APP_PORT is required in .env}"
 
   # Canonical names
   export APP_PORT="$SERVER_APP_PORT"

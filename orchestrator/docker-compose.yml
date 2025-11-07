@@ -12,7 +12,7 @@ services:
       # Main Caddyfile entrypoint
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Directory for project-specific configs
-      - ./servers-confs:/etc/caddy/conf.d:ro
+      - ./server-confs:/etc/caddy/conf.d:ro
       # Caddy's persistent data (certs, etc.)
       - ./data/caddy_data:/data
       # Shared static/media files

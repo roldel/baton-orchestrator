@@ -11,6 +11,7 @@ services :
 
     # Add this internal network for proxy pass to nginx server
     networks:
+      default: {}
       internal_proxy_pass_network:
         aliases:
           - ${DOCKER_NETWORK_SERVICE_ALIAS}
@@ -18,10 +19,13 @@ services :
 
   other-services:
     # Etc...
+    networks:
+      default: {}
 
 
 
 # And add network definition in footer
 networks:
+  default: {}
   internal_proxy_pass_network:
     external: true

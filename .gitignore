@@ -235,3 +235,5 @@ projects/*
 backup-*.tar
 *.tar.gz
 *.zip
+
+directory_report.txt

@@ -1,6 +1,6 @@
 services:
 
-caddy:
+  caddy:
     image: caddy:2-alpine
     container_name: ingress-caddy
     restart: unless-stopped
@@ -21,7 +21,7 @@ caddy:
       - internal_proxy_pass_network
 
 
-webhook:
+  webhook:
     build:
       context: ./webhook
     container_name: webhook

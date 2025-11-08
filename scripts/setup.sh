@@ -18,16 +18,12 @@ if command -v apk >/dev/null 2>&1; then
     docker-cli-compose \
     git \
     gettext \
-    dcron \
     inotify-tools >/dev/null
 
   # Enable & start Docker (OpenRC)
   rc-update add docker default >/dev/null || true
   rc-service docker start || true
 
-  # Enable & start cron (service name: crond)
-  rc-update add crond default >/dev/null || true
-  rc-service crond start || true
 else
   echo "apk not found; skipping package install (this script targets Alpine)."
 fi
@@ -38,7 +34,7 @@ fi
 mkdir -p \
   "$BASE_DIR/orchestrator/data/certs" \
   "$BASE_DIR/orchestrator/data/certbot-webroot" \
-  "$BASE_DIR/orchestrator/servers-confs" \
+  "$BASE_DIR/orchestrator/server-confs" \
   "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
   /shared-files \
   /usr/local/bin

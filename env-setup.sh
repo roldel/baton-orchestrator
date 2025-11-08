@@ -7,7 +7,7 @@ set -eu
 export BASE_DIR
 export ORCHESTRATOR_DIR="$BASE_DIR/orchestrator"
 export PROJECTS_DIR="$BASE_DIR/projects"
-export CONF_DIR="$ORCHESTRATOR_DIR/servers-confs"
+export CONF_DIR="$ORCHESTRATOR_DIR/server-confs"
 export CERTS_DIR="$ORCHESTRATOR_DIR/data/certs"
 export WEBROOT_DIR="$ORCHESTRATOR_DIR/data/certbot-webroot"
 export SHARED_FILES="/shared-files"

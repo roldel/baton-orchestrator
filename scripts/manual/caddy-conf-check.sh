@@ -1,5 +1,5 @@
 #!/bin/sh
-# Usage: ./scripts/manual/caddy-check.sh <project-name>
+# Usage: ./scripts/manual/caddy-conf-check.sh <project-name>
 # Validates /etc/caddy/conf.d/<project>.conf inside the "caddy" container
 # using your compose file at orchestrator/docker-compose.yml.
 

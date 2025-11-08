@@ -1,11 +1,12 @@
 #!/bin/sh
 # Usage: ./scripts/manual/caddy-reload.sh
+# Restarts the Caddy service to apply config changes (admin API is disabled)
 set -eu
 
 COMPOSE_FILE="orchestrator/docker-compose.yml"
 SERVICE="caddy"
-CONFIG_PATH="/etc/caddy/Caddyfile"
 
+# Detect docker compose (v2) or docker-compose (v1)
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
 elif docker-compose version >/dev/null 2>&1; then
@@ -15,14 +16,9 @@ else
   exit 1
 fi
 
-echo "[caddy-reload] Reloading config..."
+echo "[caddy-reload] Admin API disabled — restarting Caddy container to apply config..."
 set -x
-$COMPOSE -f "$COMPOSE_FILE" exec -T "$SERVICE" \
-  caddy reload --config "$CONFIG_PATH" --adapter caddyfile
+$COMPOSE -f "$COMPOSE_FILE" restart "$SERVICE"
 set +x
-echo "[caddy-reload] ✅ Reload complete."
 
-
-
-
-# docker compose -f orchestrator/docker-compose.yml exec caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+echo "[caddy-reload] Caddy container restarted."

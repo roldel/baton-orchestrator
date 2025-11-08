@@ -19,6 +19,8 @@ services:
       - /shared-files/:/shared-files/:ro
     networks:
       - internal_proxy_pass_network
+    environment:
+      CADDY_TELEMETRY=off
 
 
   webhook:

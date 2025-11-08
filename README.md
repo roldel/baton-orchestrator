@@ -21,7 +21,7 @@ touch orchestrator/webhook/.env
 docker compose -f orchestrator/docker-compose.yml up -d
 
 # cp projects/demo-website/.env.sample projects/demo-website/.env
-baton deploy demo-website
+./scripts/manual/deploy.sh <project-name>
 
 
 ```

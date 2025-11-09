@@ -1,44 +1,48 @@
 #!/bin/sh
-# scripts/cmd/deploy.sh
+# Deploy a project by name: validates, renders server conf, restarts project containers,
+# ensures certs, installs conf, reloads nginx
 set -eu
 
-[ -n "${BASE_DIR:-}" ] || { echo "Run via 'baton deploy <project>'"; exit 1; }
+PROJECT="${1:-}"
+[ -n "$PROJECT" ] || { echo "Usage: $0 <project-name>" >&2; exit 1; }
+
+# Resolve BASE_DIR then load shared env
+THIS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+BASE_DIR="$(CDPATH= cd -- "$THIS_DIR/../.." && pwd)"
+export BASE_DIR
+# shellcheck disable=SC1091
 . "$BASE_DIR/env-setup.sh"
-. "$SCRIPT_DIR/tools/load-dotenv.sh"
 
-proj="${1:-}"
-[ -n "$proj" ] || { echo "Usage: baton deploy <project>"; exit 1; }
+COMPOSE_FILE="$ORCHESTRATOR_DIR/docker-compose.yml"
 
-# Step 1: Validate project structure and .env
-. "$SCRIPT_DIR/tools/validate-project.sh"
-validate_project "$proj"
+echo "[deploy] Starting deploy for project: $PROJECT"
+echo "[deploy] BASE_DIR=$BASE_DIR"
 
-# Step 2: Load environment
-env_file="$PROJECTS_DIR/$proj/.env"
-load_dotenv "$env_file" >/dev/null
+# 1) Project structure validation
+"$SCRIPT_DIR/tools/project/project-validator.sh" "$PROJECT"
 
-# Step 3: Render Caddy config
-. "$SCRIPT_DIR/tools/render-caddy-conf.sh"
-rendered=$(render_caddy_conf "$proj")
+# 2) Env validation
+"$SCRIPT_DIR/tools/project/env-validator.sh" "$PROJECT"
 
-# Step 4: Stage config
-. "$SCRIPT_DIR/tools/stage-config.sh"
-tmp=$(stage_config "$rendered" "$DOMAIN_NAME")
+# 3) Render server.conf → orchestrator/server-confs/<project>.conf
+"$SCRIPT_DIR/tools/project/render-conf-server-file.sh" "$PROJECT"
 
-# Step 5: Test Caddy config
-. "$SCRIPT_DIR/tools/caddy-test.sh"
-caddy_test "$tmp"
+# 4) Restart project containers: down → up -d (clean state + apply .env)
+"$SCRIPT_DIR/tools/project/project-restart.sh" "$PROJECT"
 
-# Step 6: Commit config
-. "$SCRIPT_DIR/tools/commit-config.sh"
-commit_config "$tmp" "$DOMAIN_NAME"
-
-# Step 7: Reload Caddy
-echo "Reloading Caddy to apply new configuration..."
-if docker exec ingress-caddy caddy reload --config /etc/caddy/Caddyfile; then
-  echo "Successfully deployed and reloaded Caddy for $DOMAIN_NAME"
-else
-  echo "ERROR: Caddy reload failed. Check Caddy container logs for details:" >&2
-  echo "  docker logs ingress-caddy" >&2
-  exit 1
+# 5) SSL: check certs; if missing/expiring/aliases mismatch → issue
+if ! "$SCRIPT_DIR/tools/ssl-management/ssl-certs-checker.sh" "$PROJECT"; then
+  echo "[deploy] SSL not valid; running initial issuance…"
+  "$SCRIPT_DIR/tools/ssl-management/initial-issual.sh" "$PROJECT"
 fi
+
+# 6) Install the rendered server block into nginx/conf.d
+"$SCRIPT_DIR/tools/nginx/add-server-conf.sh" "$PROJECT"
+
+# 7) Syntax check full nginx config through running container
+"$SCRIPT_DIR/tools/project/server-syntax-check.sh"
+
+# 8) Reload Nginx
+"$SCRIPT_DIR/tools/nginx/server-reload.sh"
+
+echo "[deploy] Completed for project: $PROJECT"

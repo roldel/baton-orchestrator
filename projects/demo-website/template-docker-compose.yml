@@ -5,7 +5,7 @@ services :
     #...
     #...
 
-    volume:
+    volumes:
       - /shared-files/${DOMAIN_NAME}/static:/static:rw
       - /shared-files/${DOMAIN_NAME}/media:/media:rw
 

@@ -18,6 +18,7 @@ if command -v apk >/dev/null 2>&1; then
     docker-cli-compose \
     git \
     gettext \
+    openssl \
     inotify-tools >/dev/null
 
   # Enable & start Docker (OpenRC)

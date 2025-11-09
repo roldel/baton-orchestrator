@@ -36,8 +36,7 @@ mkdir -p \
   "$BASE_DIR/orchestrator/data/certbot-webroot" \
   "$BASE_DIR/orchestrator/server-confs" \
   "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
-  /shared-files \
-  /usr/local/bin
+  /shared-files
 
 #--------------------#
 # Docker prerequisites
@@ -58,16 +57,5 @@ else
   echo "WARNING: Docker not found on PATH. Install/enable Docker before deploying."
 fi
 
-#-------------------#
-# Baton CLI symlink
-#-------------------#
-BATON_SRC="$BASE_DIR/scripts/baton"
-BATON_DEST="/usr/local/bin/baton"
-
-echo "Installing baton → $BATON_DEST"
-ln -sf "$BATON_SRC" "$BATON_DEST"
-chmod +x "$BATON_SRC"
-
 echo
 echo "Setup complete!"
-echo "Run: baton deploy demo-website"

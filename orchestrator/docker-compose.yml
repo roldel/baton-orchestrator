@@ -46,8 +46,8 @@ services:
       context: ./webhook
     container_name: webhook
     restart: unless-stopped
-    env_file:
-      - ./webhook/.env
+    #env_file:
+    #  - ./webhook/.env
     volumes:
       - ./webhook-redeploy-instruct/:/signal-to-host:rw
     healthcheck:

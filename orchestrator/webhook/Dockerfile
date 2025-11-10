@@ -12,4 +12,4 @@ COPY . .
 # Drop privileges
 USER app
 # Start the Flask app with gunicorn
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "-k", "gthread", "--threads", "4", "--timeout", "30", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "-k", "gthread", "--threads", "4", "--timeout", "30", "webhook.app:app"]

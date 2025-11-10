@@ -40,7 +40,6 @@ services:
     image: certbot/certbot:latest
     container_name: certbot
     restart: no
-    command: sleep infinity
     volumes:
     - ./data/certs:/etc/letsencrypt            
     - ./data/certbot-webroot:/var/www/acme-challenge

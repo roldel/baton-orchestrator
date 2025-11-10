@@ -24,7 +24,7 @@ WEBHOOK_PROJECTS_DIR = os.environ.get(
 # Where task files are written; map this path to host via docker-compose
 SIGNAL_TO_HOST_DIR = os.environ.get(
     "SIGNAL_TO_HOST_DIR",
-    "/webhook-redeploy-instruct"
+    "/signal-to-host"
 )
 
 # -----------------------------------------------------------------------------

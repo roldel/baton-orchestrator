@@ -239,3 +239,5 @@ backup-*.tar
 *.zip
 
 directory_report.txt
+
+orchestrator/nginx/conf.d/

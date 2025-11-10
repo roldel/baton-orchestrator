@@ -11,13 +11,17 @@ services:
         # Main NGINX config
         - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
 
-        # Additional server blocks (acme, health, per-project)
-        - ./nginx/conf.d:/etc/nginx/conf.d:ro
-        
-        - ./data/certs:/etc/letsencrypt:ro       
+        # Admin/orchestrator configs (tracked in git)
+        - ./nginx/admin-conf.d:/etc/nginx/admin-conf.d:ro
+
+        # Project-specific configs (generated at deploy, ignored in git)
+        - ./nginx/conf.d:/etc/nginx/conf.d
+
+        # Certs & ACME
+        - ./data/certs:/etc/letsencrypt:ro
         - ./data/certbot-webroot:/var/www/acme-challenge:ro
 
-        # Shared static/media files for all projects
+        # Shared assets for the different projects
         - /shared-files/:/shared-files/:ro
 
       networks:

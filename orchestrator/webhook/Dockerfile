@@ -1,7 +1,7 @@
 FROM python:3.11-alpine
 # Create non-root user
-RUN addgroup -S app && adduser -S app -G app
-WORKDIR /app/webhook  # <--- Change Workdir to /app/webhook
+#RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
 # Install Python deps first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
@@ -10,6 +10,6 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy app - this will now copy app.py and utils.py into /app/webhook
 COPY . . 
 # Drop privileges
-USER app
+#USER app
 # Start the Flask app with gunicorn
 CMD ["gunicorn", "-b", "0.0.0.0:5000", "-k", "gthread", "--threads", "4", "--timeout", "30", "app:app"]

@@ -2,7 +2,7 @@
 # Irreversible cleanup; run as root
 set -eu
 
-# Resolve repo root
+# Resolve repo root (robust across symlinks)
 if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
   REAL_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
 else
@@ -19,46 +19,73 @@ read -r confirm
 
 COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
 
-# Stop stack if possible
-if [ -f "$COMPOSE_FILE" ] && docker info >/dev/null 2>&1; then
-  echo "Stopping orchestrator..."
-  docker compose -f "$COMPOSE_FILE" down -v || true
+# -------------------------------
+# 1. Stop webhook inotify watcher
+# -------------------------------
+WATCHER_PID_FILE="$BASE_DIR/.webhook-watcher.pid"
+if [ -f \"$WATCHER_PID_FILE\" ]; then
+    PID=$(cat \"$WATCHER_PID_FILE\")
+    echo \"[cleanup] Stopping webhook watcher (PID: $PID)\"
+    kill \"$PID\" 2>/dev/null || true
+    rm -f \"$WATCHER_PID_FILE\"
 fi
 
-# Remove baton from PATH variants
+# -------------------------------
+# 2. Stop Docker stack
+# -------------------------------
+if [ -f \"$COMPOSE_FILE\" ] && docker info >/dev/null 2>&1; then
+  echo \"Stopping orchestrator services (nginx, webhook, etc.)...\"
+  docker compose -f \"$COMPOSE_FILE\" down -v --remove-orphans || true
+fi
+
+# -------------------------------
+# 3. Remove baton CLI (if symlinked)
+# -------------------------------
 for p in /usr/local/bin/baton /usr/local/sbin/baton /usr/bin/baton; do
-  [ -e "$p" ] && { rm -f "$p"; echo "Removed $p"; }
+  [ -e \"$p\" ] && { rm -f \"$p\"; echo \"Removed $p\"; }
 done
 hash -r 2>/dev/null || true
 
-# Remove Docker network
+# -------------------------------
+# 4. Remove Docker network
+# -------------------------------
 if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-  echo "Removing network: internal_proxy_pass_network"
+  echo \"Removing network: internal_proxy_pass_network\"
   docker network rm internal_proxy_pass_network || true
 fi
 
-# Remove repo data dirs
-echo "Removing data directories..."
-rm -rf "$BASE_DIR/orchestrator/data" \
-       "$BASE_DIR/orchestrator/servers-confs" \
-       "$BASE_DIR/orchestrator/webhook-redeploy-instruct" 2>/dev/null || true
+# -------------------------------
+# 5. Remove data directories
+# -------------------------------
+echo \"Removing orchestrator data...\"
+rm -rf \
+  \"$BASE_DIR/orchestrator/data\" \
+  \"$BASE_DIR/orchestrator/server-confs\" \
+  \"$BASE_DIR/orchestrator/webhook-redeploy-instruct\" \
+  \"$BASE_DIR/logs\" \
+  2>/dev/null || true
 
-# Remove shared files
+# -------------------------------
+# 6. Remove shared files
+# -------------------------------
 if [ -d /shared-files ]; then
-  echo "Removing /shared-files (all static/media)"
+  echo \"Removing /shared-files (all static/media)\"
   rm -rf /shared-files/*
   rmdir /shared-files 2>/dev/null || true
 fi
 
-printf "Remove entire repo directory? (YES to delete $BASE_DIR): "
+# -------------------------------
+# 7. Optional: delete entire repo
+# -------------------------------
+printf \"Remove entire repo directory? (YES to delete $BASE_DIR): \"
 read -r remove_repo
-if [ "$remove_repo" = "YES" ]; then
+if [ \"$remove_repo\" = \"YES\" ]; then
   cd /
-  rm -rf "$BASE_DIR"
-  echo "Deleted $BASE_DIR"
+  rm -rf \"$BASE_DIR\"
+  echo \"Deleted $BASE_DIR\"
 else
-  echo "Repo kept at $BASE_DIR"
+  echo \"Repo kept at $BASE_DIR\"
 fi
 
 echo
-echo "Cleanup complete."
+echo \"Cleanup complete.\"

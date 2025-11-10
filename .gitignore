@@ -244,3 +244,4 @@ orchestrator/nginx/conf.d/
 
 !projects/webhook-watcher
 
+orchestrator/webhook/projects/**

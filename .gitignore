@@ -222,6 +222,8 @@ projects/*
 /orchestrator/data/certbot-webroot/
 /orchestrator/data/certbot-webroot/**/*
 
+/orchestrator/server-confs/
+
 # Any accidental archives/backups of certs
 *.pem
 *.key

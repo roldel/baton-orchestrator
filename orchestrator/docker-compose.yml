@@ -25,7 +25,8 @@ services:
         - /shared-files/:/shared-files/:ro
 
       networks:
-        - internal_proxy_pass_network
+        - internal_proxy_pass_network # Existing network for other projects
+        - nginx_webhook_network
 
       healthcheck:
         test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
@@ -50,8 +51,6 @@ services:
       context: ./webhook
     container_name: webhook
     restart: unless-stopped
-    #env_file:
-    #  - ./webhook/.env
     volumes:
       - ./webhook-redeploy-instruct/:/signal-to-host:rw
     healthcheck:
@@ -59,8 +58,15 @@ services:
       interval: 10s
       timeout: 2s
       retries: 10
+    networks:
+      nginx_webhook_network:
+        aliases:
+          - orchestrator-webhook
 
 
 networks:
   internal_proxy_pass_network:
     external: true
+
+  nginx_webhook_network:
+    driver: bridge

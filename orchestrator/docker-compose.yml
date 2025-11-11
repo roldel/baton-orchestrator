@@ -52,6 +52,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./webhook-redeploy-instruct/:/signal-to-host:rw
+      - ./webhook/projects:/app/projects:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:${PORT:-5000}/health || exit 1"]
       interval: 10s

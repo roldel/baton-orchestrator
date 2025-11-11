@@ -1,4 +1,4 @@
-mv service-file.sh to  /etc/init.d/baton-webhook
+mv /opt/baton-orchestrator/tools/webhook/service-file.sh /etc/init.d/baton-webhook
 
 chmod +x /etc/init.d/baton-webhook
 rc-update add baton-webhook default

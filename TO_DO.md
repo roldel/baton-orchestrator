@@ -11,3 +11,5 @@ Orchestrator:
 - Integrate bot messaging to follow up
     - Daily health report
     - follow up and status upon baton commands
+
+- rethink volumes for more cert persistence in main compose

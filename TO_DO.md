@@ -1,14 +1,13 @@
 Orchestrator:
 
-- implement project with proper domain name for testing
-- finish the deploy process with certs checks/issual/.renewal/server reload
 - fine tune command list and adjust with tools
 - clean up tools and commands
 
-- Create host level project deploy command
-- Inotify on host + hook redeployment process
-- create env and logic for webhook pipeline
+- Make webhook failure process robust : incorrect task file, send file to a failed dir
+- Test updated setup
 
-- host cronjob and inotify
+- Update README.md
 
-- add nginx proxyass to webhook in nginx main conf file (or custom .env string)
+- Integrate bot messaging to follow up
+    - Daily health report
+    - follow up and status upon baton commands

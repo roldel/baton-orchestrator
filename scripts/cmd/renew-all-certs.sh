@@ -5,13 +5,14 @@
 set -eu
 
 # Resolve BASE_DIR then load shared env
-THIS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-BASE_DIR="$(CDPATH= cd -- "$THIS_DIR/../.." && pwd)"
-export BASE_DIR
+if [ -z "${BASE_DIR:-}" ]; then
+  THIS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+  BASE_DIR="$(CDPATH= cd -- "$THIS_DIR/../.." && pwd)"
+  export BASE_DIR
+fi
 # shellcheck disable=SC1091
 . "$BASE_DIR/env-setup.sh"
 
-LOG_FILE="$BASE_DIR/logs/cert-renewal.log"
 # Redirect all output for this script to the log file, with timestamps
 exec > >(tee -a "$LOG_FILE" | sed 's/^/['"$(date '+%Y-%m-%d %H:%M:%S')"'] /') 2>&1
 

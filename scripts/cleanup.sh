@@ -2,6 +2,12 @@
 # Irreversible cleanup; run as root
 set -eu
 
+# --- Root Check ---
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: This script must be run as root." >&2
+  exit 1
+fi
+
 # Resolve repo root (robust across symlinks)
 # Using realpath if available, otherwise fallback
 if command -v realpath >/dev/null 2>&1; then
@@ -21,7 +27,7 @@ read -r confirm
 
 COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
 # Define paths for new components from setup.sh
-CRON_JOB_FILE="/etc/cron.d/baton-ssl-renewal"
+CRON_WRAPPER_DEST="/etc/periodic/daily/baton-ssl-renewal"
 INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
 BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
 OLD_WEBHOOK_PID_FILE="$BASE_DIR/.webhook-watcher.pid" # Keep for compatibility, though OpenRC manages PID now
@@ -59,9 +65,9 @@ fi
 # -------------------------------
 # 2. Remove SSL Renewal Cron Job
 # -------------------------------
-if [ -f "$CRON_JOB_FILE" ]; then
-  echo "[cleanup] Removing SSL renewal cron job: $CRON_JOB_FILE"
-  rm -f "$CRON_JOB_FILE"
+if [ -f "$CRON_WRAPPER_DEST" ]; then
+  echo "[cleanup] Removing SSL renewal cron job: $CRON_WRAPPER_DEST"
+  rm -f "$CRON_WRAPPER_DEST"
 fi
 # Also remove the specific log file for cert renewal if it exists
 if [ -f "$BASE_DIR/logs/cert-renewal.log" ]; then
@@ -81,21 +87,7 @@ else
 fi
 
 # -------------------------------
-# 4. Remove baton CLI (if symlinked)
-# -------------------------------
-# Iterate through common bin paths for 'baton' symlink
-for p in /usr/local/bin/baton /usr/local/sbin/baton /usr/bin/baton; do
-  if [ -L "$p" ] && [ "$(readlink -f "$p")" = "$(realpath "$BASE_DIR")" ]; then
-    rm -f "$p"
-    echo "Removed symlink: $p"
-  elif [ -e "$p" ]; then
-    echo "WARNING: Found non-symlink/unrelated 'baton' at $p, not removing." >&2
-  fi
-done
-hash -r 2>/dev/null || true
-
-# -------------------------------
-# 5. Remove Docker network
+# 4. Remove Docker network
 # -------------------------------
 if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
   echo "Removing network: internal_proxy_pass_network"
@@ -105,7 +97,7 @@ else
 fi
 
 # -------------------------------
-# 6. Remove orchestrator data directories
+# 5. Remove orchestrator data directories
 # -------------------------------
 echo "Removing orchestrator data directories..."
 rm -rf \
@@ -116,7 +108,7 @@ rm -rf \
   2>/dev/null || true
 
 # -------------------------------
-# 7. Remove shared files directory (if created by setup)
+# 6. Remove shared files directory (if created by setup)
 # -------------------------------
 if [ -d /shared-files ]; then
   echo "Removing /shared-files (all static/media)"
@@ -129,7 +121,7 @@ if [ -d /shared-files ]; then
 fi
 
 # -------------------------------
-# 8. Optional: delete entire repo
+# 7. Optional: delete entire repo
 # -------------------------------
 printf "Remove entire repo directory? (YES to delete $BASE_DIR): "
 read -r remove_repo

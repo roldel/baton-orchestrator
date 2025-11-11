@@ -3,10 +3,12 @@
 set -eu
 
 # Resolve repo root (robust across symlinks)
-if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
-  REAL_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
+# Using realpath if available, otherwise fallback
+if command -v realpath >/dev/null 2>&1; then
+  REAL_PATH=$(realpath "$0")
 else
-  REAL_PATH="$0"
+  # Fallback for systems without realpath (e.g., some minimal Alpine setups)
+  REAL_PATH=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
 fi
 REAL_DIR=$(CDPATH= cd -- "$(dirname -- "$REAL_PATH")" && pwd)
 BASE_DIR=$(CDPATH= cd -- "$REAL_DIR/.." && pwd)
@@ -18,74 +20,127 @@ read -r confirm
 [ "$confirm" != "YES" ] && { echo "Aborted."; exit 1; }
 
 COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
+# Define paths for new components from setup.sh
+CRON_JOB_FILE="/etc/cron.d/baton-ssl-renewal"
+INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
+BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
+OLD_WEBHOOK_PID_FILE="$BASE_DIR/.webhook-watcher.pid" # Keep for compatibility, though OpenRC manages PID now
 
 # -------------------------------
-# 1. Stop webhook inotify watcher
+# 1. Stop and disable baton-webhook OpenRC service
 # -------------------------------
-WATCHER_PID_FILE="$BASE_DIR/.webhook-watcher.pid"
-if [ -f \"$WATCHER_PID_FILE\" ]; then
-    PID=$(cat \"$WATCHER_PID_FILE\")
-    echo \"[cleanup] Stopping webhook watcher (PID: $PID)\"
-    kill \"$PID\" 2>/dev/null || true
-    rm -f \"$WATCHER_PID_FILE\"
+if [ -f "$INIT_D_SERVICE_FILE" ]; then
+  echo "[cleanup] Stopping and disabling baton-webhook service…"
+  # Use 'stop' command of the service script
+  if rc-service baton-webhook status >/dev/null 2>&1; then
+    rc-service baton-webhook stop || true
+  fi
+  # Remove from default runlevels
+  if rc-update show | grep -q "baton-webhook"; then
+    rc-update del "baton-webhook" "default" || true
+  fi
+  rm -f "$INIT_D_SERVICE_FILE"
+  echo "[cleanup] Removed $INIT_D_SERVICE_FILE"
+fi
+# Remove the associated log file
+if [ -f "$BATON_WEBHOOK_LOG_FILE" ]; then
+  rm -f "$BATON_WEBHOOK_LOG_FILE"
+  echo "[cleanup] Removed $BATON_WEBHOOK_LOG_FILE"
+fi
+
+# Compatibility: Remove old webhook inotify watcher PID file if it exists
+if [ -f "$OLD_WEBHOOK_PID_FILE" ]; then
+    PID=$(cat "$OLD_WEBHOOK_PID_FILE")
+    echo "[cleanup] Stopping old webhook watcher (PID: $PID) if still running…"
+    kill "$PID" 2>/dev/null || true
+    rm -f "$OLD_WEBHOOK_PID_FILE"
 fi
 
 # -------------------------------
-# 2. Stop Docker stack
+# 2. Remove SSL Renewal Cron Job
 # -------------------------------
-if [ -f \"$COMPOSE_FILE\" ] && docker info >/dev/null 2>&1; then
-  echo \"Stopping orchestrator services (nginx, webhook, etc.)...\"
-  docker compose -f \"$COMPOSE_FILE\" down -v --remove-orphans || true
+if [ -f "$CRON_JOB_FILE" ]; then
+  echo "[cleanup] Removing SSL renewal cron job: $CRON_JOB_FILE"
+  rm -f "$CRON_JOB_FILE"
+fi
+# Also remove the specific log file for cert renewal if it exists
+if [ -f "$BASE_DIR/logs/cert-renewal.log" ]; then
+  rm -f "$BASE_DIR/logs/cert-renewal.log"
+  echo "[cleanup] Removed $BASE_DIR/logs/cert-renewal.log"
+fi
+
+
+# -------------------------------
+# 3. Stop Docker stack
+# -------------------------------
+if [ -f "$COMPOSE_FILE" ] && docker info >/dev/null 2>&1; then
+  echo "Stopping orchestrator services (nginx, webhook, etc.)..."
+  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
+else
+  echo "Orchestrator Docker Compose not found or Docker not running; skipping stack down."
 fi
 
 # -------------------------------
-# 3. Remove baton CLI (if symlinked)
+# 4. Remove baton CLI (if symlinked)
 # -------------------------------
+# Iterate through common bin paths for 'baton' symlink
 for p in /usr/local/bin/baton /usr/local/sbin/baton /usr/bin/baton; do
-  [ -e \"$p\" ] && { rm -f \"$p\"; echo \"Removed $p\"; }
+  if [ -L "$p" ] && [ "$(readlink -f "$p")" = "$(realpath "$BASE_DIR")" ]; then
+    rm -f "$p"
+    echo "Removed symlink: $p"
+  elif [ -e "$p" ]; then
+    echo "WARNING: Found non-symlink/unrelated 'baton' at $p, not removing." >&2
+  fi
 done
 hash -r 2>/dev/null || true
 
 # -------------------------------
-# 4. Remove Docker network
+# 5. Remove Docker network
 # -------------------------------
 if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-  echo \"Removing network: internal_proxy_pass_network\"
+  echo "Removing network: internal_proxy_pass_network"
   docker network rm internal_proxy_pass_network || true
+else
+  echo "Docker network internal_proxy_pass_network not found; skipping removal."
 fi
 
 # -------------------------------
-# 5. Remove data directories
+# 6. Remove orchestrator data directories
 # -------------------------------
-echo \"Removing orchestrator data...\"
+echo "Removing orchestrator data directories..."
 rm -rf \
-  \"$BASE_DIR/orchestrator/data\" \
-  \"$BASE_DIR/orchestrator/server-confs\" \
-  \"$BASE_DIR/orchestrator/webhook-redeploy-instruct\" \
-  \"$BASE_DIR/logs\" \
+  "$BASE_DIR/orchestrator/data" \
+  "$BASE_DIR/orchestrator/server-confs" \
+  "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
+  "$BASE_DIR/logs" \
   2>/dev/null || true
 
 # -------------------------------
-# 6. Remove shared files
+# 7. Remove shared files directory (if created by setup)
 # -------------------------------
 if [ -d /shared-files ]; then
-  echo \"Removing /shared-files (all static/media)\"
+  echo "Removing /shared-files (all static/media)"
+  # Be careful here: only remove if it's empty or you're absolutely sure
+  # it was created by baton and only contains baton-related files.
+  # For safety, you might want to only remove its *contents* or ask user confirmation.
+  # Given the prompt, we'll assume a full removal is intended.
   rm -rf /shared-files/*
-  rmdir /shared-files 2>/dev/null || true
+  rmdir /shared-files 2>/dev/null || true # rmdir only removes empty directories
 fi
 
 # -------------------------------
-# 7. Optional: delete entire repo
+# 8. Optional: delete entire repo
 # -------------------------------
-printf \"Remove entire repo directory? (YES to delete $BASE_DIR): \"
+printf "Remove entire repo directory? (YES to delete $BASE_DIR): "
 read -r remove_repo
-if [ \"$remove_repo\" = \"YES\" ]; then
-  cd /
-  rm -rf \"$BASE_DIR\"
-  echo \"Deleted $BASE_DIR\"
+if [ "$remove_repo" = "YES" ]; then
+  # It's safer to use the absolute path directly than `cd /` then `rm`.
+  # This also ensures the script deletes the correct directory even if `cd /` somehow failed.
+  rm -rf "$BASE_DIR"
+  echo "Deleted $BASE_DIR"
 else
-  echo \"Repo kept at $BASE_DIR\"
+  echo "Repo kept at $BASE_DIR"
 fi
 
 echo
-echo \"Cleanup complete.\"
+echo "Cleanup complete."

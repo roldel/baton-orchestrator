@@ -1,30 +1,31 @@
-# File: /home/x/Code/baton-orchestrator/scripts/cron-wrappers/renew-certs-daily.sh
 #!/bin/sh
-# This wrapper script is called by crond to manage SSL certificate renewal.
-# It ensures the correct environment is set for the actual renewal script.
-#
-# {{BATON_PROJECT_ROOT}} is a placeholder that will be replaced by setup.sh
-# with the absolute path of the baton-orchestrator project.
+# baton-ssl-renewal.sh — cron job for daily SSL cert renewal
+# Installed to /etc/periodic/daily/baton-ssl-renewal by scripts/setup.sh
+set -eu
 
-# --- IMPORTANT: This path will be replaced during setup.sh execution ---
-BATON_PROJECT_ROOT="{{BATON_PROJECT_ROOT}}"
-
-# --- Configure the environment for the renewal script ---
-export BASE_DIR="$BATON_PROJECT_ROOT"
-# Ensure common binaries are in PATH, as cron's PATH can be minimal
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-# Define the log file for this specific cron job
+# Adjust this if you *really* install baton somewhere else.
+BASE_DIR="/opt/baton-orchestrator"
+RENEW_SCRIPT="$BASE_DIR/scripts/cmd/renew-all-certs.sh"
 LOG_FILE="$BASE_DIR/logs/cert-renewal.log"
 
-# --- Ensure log directory exists before attempting to write to it ---
-mkdir -p "$(dirname "$LOG_FILE")" || {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Failed to create log directory for cron job." >&2
+# Cron usually has a very minimal PATH
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Basic sanity checks
+if [ ! -x "$RENEW_SCRIPT" ]; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $RENEW_SCRIPT not found or not executable" >&2
+  exit 1
+fi
+
+# Ensure log directory exists
+LOG_DIR="$(dirname "$LOG_FILE")"
+mkdir -p "$LOG_DIR" 2>/dev/null || {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: Cannot create log dir: $LOG_DIR" >&2
   exit 1
 }
 
-# --- Execute the actual SSL renewal script ---
-# `exec` replaces the current shell with the executed script,
-# ensuring the exit status of renew-all-certs.sh is the cron job's exit status.
-# All output (stdout and stderr) is redirected to the log file.
-exec "$BASE_DIR/scripts/cmd/renew-all-certs.sh" >> "$LOG_FILE" 2>&1
+# Run the renewal script; all output goes to the log.
+# Any non-zero exit from the renewal script will bubble up to cron.
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] --- Starting renew-all-certs.sh ---" >>"$LOG_FILE" 2>&1
+"$RENEW_SCRIPT" >>"$LOG_FILE" 2>&1
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] --- Finished renew-all-certs.sh (rc=$?) ---" >>"$LOG_FILE" 2>&1

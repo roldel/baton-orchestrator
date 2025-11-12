@@ -95,13 +95,14 @@ fi
 #--------------------#
 # SSL Renewal Cron Job
 #--------------------#
-WRAPPER_TEMPLATE_SRC="$BASE_DIR/scripts/tools/cron-wrappers/renew-certs-daily.sh"
+# Using the hardcoded version of the renewal script directly.
+CRON_JOB_SRC="$BASE_DIR/scripts/tools/cron-jobs/renew-all-certs-hardcoded.sh"
 CRON_WRAPPER_DEST="/etc/periodic/daily/baton-ssl-renewal"
 RENEWAL_LOG="$BASE_DIR/logs/cert-renewal.log"
 echo "Installing daily SSL renewal job..."
-[ -f "$WRAPPER_TEMPLATE_SRC" ] || { echo "ERROR: Missing wrapper template: $WRAPPER_TEMPLATE_SRC" >&2; exit 1; }
-cp "$WRAPPER_TEMPLATE_SRC" "$CRON_WRAPPER_DEST"
-sed -i "s|{{BATON_PROJECT_ROOT}}|$(printf '%s\n' "$BASE_DIR" | sed -e 's/[]\/$*.^[]/\\&/g')|" "$CRON_WRAPPER_DEST"
+[ -f "$CRON_JOB_SRC" ] || { echo "ERROR: Missing cron job source: $CRON_JOB_SRC" >&2; exit 1; }
+cp "$CRON_JOB_SRC" "$CRON_WRAPPER_DEST"
+# No sed replacement needed for the hardcoded script
 chmod 755 "$CRON_WRAPPER_DEST"
 echo "  Installed: $CRON_WRAPPER_DEST (runs with system's daily periodic cron)"
 echo "  Logs:      $RENEWAL_LOG"

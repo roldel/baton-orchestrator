@@ -5,7 +5,7 @@
 name="Baton Webhook Watcher"
 description="Monitors /srv/webhooks/signals/ for task_*.baton and triggers redeploys"
 
-command="/opt/baton-orchestrator/scripts/tools/webhook/watch_webhook.sh"
+command="/opt/baton-orchestrator/scripts/tools/webhook/watch-webhook.sh"
 command_background="yes"
 pidfile="/run/baton-webhook.pid"
 output_log="/var/log/baton-webhook.log"

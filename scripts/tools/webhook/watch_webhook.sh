@@ -77,7 +77,7 @@ inotifywait -m -q -e close_write -e moved_to \
 while IFS= read -r path; do
   case "$(basename -- "$path")" in
     $PATTERN) process_file "$path" ;;
-  endac
+  esac
 done
 
 log "Watcher stopping."

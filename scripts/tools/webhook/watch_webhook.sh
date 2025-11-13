@@ -24,15 +24,17 @@ need() {
 }
 
 # --- Graceful shutdown handling ---
+stop=0
+
 graceful_stop() {
   # This runs when OpenRC sends SIGTERM/SIGINT
   log "Shutdown signal received, stopping watcher…"
-  # Exiting here ends the main shell; inotifywait + the pipeline will die when
-  # their pipe is broken, so we don't need to micro-manage them.
-  exit 0
+  stop=1
+  # Kill all processes in this group (including any running inotifywait)
+  kill 0 2>/dev/null || true
 }
 
-trap graceful_stop INT TERM
+trap 'graceful_stop' INT TERM
 
 # --- Basic validation ---
 [ -d "$WATCH_DIR" ] || { log "Watch dir not found: $WATCH_DIR"; exit 1; }
@@ -70,11 +72,19 @@ else
 fi
 
 # --- Live monitoring loop ---
+# We call inotifywait once per event (no pipeline, no subshell).
 # close_write → file finished writing
 # moved_to   → file atomically renamed into watch dir
-inotifywait -m -q -e close_write -e moved_to \
-  --format '%w%f' "$WATCH_DIR" | \
-while IFS= read -r path; do
+
+while [ "$stop" -eq 0 ]; do
+  # inotifywait returns non-zero on error or if killed.
+  if ! path="$(inotifywait -q -e close_write -e moved_to --format '%w%f' "$WATCH_DIR" 2>/dev/null)"; then
+    # If we're stopping, break out; otherwise, brief retry.
+    [ "$stop" -ne 0 ] && break
+    sleep 1
+    continue
+  fi
+
   case "$(basename -- "$path")" in
     $PATTERN) process_file "$path" ;;
   esac

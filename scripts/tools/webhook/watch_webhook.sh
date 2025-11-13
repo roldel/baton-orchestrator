@@ -23,14 +23,21 @@ need() {
   }
 }
 
+# --- Graceful shutdown handling ---
+graceful_stop() {
+  # This runs when OpenRC sends SIGTERM/SIGINT
+  log "Shutdown signal received, stopping watcher…"
+  # Exiting here ends the main shell; inotifywait + the pipeline will die when
+  # their pipe is broken, so we don't need to micro-manage them.
+  exit 0
+}
+
+trap graceful_stop INT TERM
+
 # --- Basic validation ---
 [ -d "$WATCH_DIR" ] || { log "Watch dir not found: $WATCH_DIR"; exit 1; }
 [ -x "$HANDLER" ]   || { log "Handler not executable: $HANDLER"; exit 1; }
 need inotifywait    # required for file monitoring
-
-# --- Graceful shutdown handling ---
-stop=0
-trap 'stop=1' INT TERM
 
 # --- File processor ---
 process_file() {
@@ -57,7 +64,6 @@ if [ -n "$BACKLOG_LIST" ]; then
   log "Backlog found; processing existing tasks..."
   echo "$BACKLOG_LIST" | while IFS= read -r f; do
     [ -n "$f" ] && process_file "$f"
-    [ "$stop" -eq 1 ] && exit 0
   done
 else
   log "No backlog to process."
@@ -65,14 +71,13 @@ fi
 
 # --- Live monitoring loop ---
 # close_write → file finished writing
-# moved_to → file atomically renamed into watch dir
+# moved_to   → file atomically renamed into watch dir
 inotifywait -m -q -e close_write -e moved_to \
   --format '%w%f' "$WATCH_DIR" | \
 while IFS= read -r path; do
-  [ "$stop" -eq 1 ] && break
   case "$(basename -- "$path")" in
     $PATTERN) process_file "$path" ;;
-  esac
+  endac
 done
 
 log "Watcher stopping."

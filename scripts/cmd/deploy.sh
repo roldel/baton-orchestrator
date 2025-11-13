@@ -3,46 +3,63 @@
 # ensures certs, installs conf, reloads nginx
 set -eu
 
-PROJECT="${1:-}"
-[ -n "$PROJECT" ] || { echo "Usage: $0 <project-name>" >&2; exit 1; }
-
-# Resolve BASE_DIR then load shared env
-THIS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-BASE_DIR="$(CDPATH= cd -- "$THIS_DIR/../.." && pwd)"
-export BASE_DIR
-# shellcheck disable=SC1091
-. "$BASE_DIR/env-setup.sh"
-
-COMPOSE_FILE="$ORCHESTRATOR_DIR/docker-compose.yml"
-
-echo "[deploy] Starting deploy for project: $PROJECT"
-echo "[deploy] BASE_DIR=$BASE_DIR"
-
-# 1) Project structure validation
-"$SCRIPT_DIR/tools/project/project-validator.sh" "$PROJECT"
-
-# 2) Env validation
-"$SCRIPT_DIR/tools/project/env-validator.sh" "$PROJECT"
-
-# 3) Render server.conf → orchestrator/server-confs/<project>.conf
-"$SCRIPT_DIR/tools/project/render-conf-server-file.sh" "$PROJECT"
-
-# 4) Restart project containers: down → up -d (clean state + apply .env)
-"$SCRIPT_DIR/tools/project/project-restart.sh" "$PROJECT"
-
-# 5) SSL: check certs; if missing/expiring/aliases mismatch → issue
-if ! "$SCRIPT_DIR/tools/ssl-management/ssl-certs-checker.sh" "$PROJECT"; then
-  echo "[deploy] SSL not valid; running initial issuance…"
-  "$SCRIPT_DIR/tools/ssl-management/initial-issual.sh" "$PROJECT"
+# --- Collect project name ---
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <project-name>" >&2
+    exit 1
 fi
 
-# 6) Install the rendered server block into nginx/conf.d
-"$SCRIPT_DIR/tools/nginx/add-server-conf.sh" "$PROJECT"
+PROJECT="$1"
 
-# 7) Syntax check full nginx config through running container
-"$SCRIPT_DIR/tools/project/server-syntax-check.sh"
+BASE_DIR="/opt/baton-orchestrator"
 
-# 8) Reload Nginx
-"$SCRIPT_DIR/tools/nginx/server-reload.sh"
+PROJECT_DIR="/srv/projects/$PROJECT"
+
+TOOLS_DIR="$BASE_DIR/scripts/tools"
+
+ORCHESTRATOR_COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
+
+echo "[deploy] Starting deploy for project: $PROJECT"
+
+
+# Call the modular steps in order
+
+
+# 1) Project structure validation
+sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
+
+# 2) Project content validation
+sh "$TOOLS_DIR/projects/validate-content.sh" "$PROJECT"
+COMPOSE_FILE="$(sh "$TOOLS_DIR/helpers/detect-compose-file.sh" "$PROJECT_DIR")"
+echo "[deploy] Using compose file: $COMPOSE_FILE"
+
+# 3) Env validation
+REQUIRED_ENV_VARS="
+  DOMAIN_NAME
+  DOCKER_NETWORK_SERVICE_ALIAS
+  APP_PORT
+  DOMAIN_ADMIN_EMAIL
+"
+sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" $REQUIRED_ENV_VARS
+
+# 4) Render server.conf template
+RENDERED_FILE="$(sh "$TOOLS_DIR/projects/render-server-conf.sh" "$PROJECT")"
+echo "[deploy] Rendered server config at: $RENDERED_FILE"
+
+# 5) Restart project containers: down → up -d (clean state + apply .env)
+sh "$TOOLS_DIR/projects/restart-containers.sh" "$PROJECT"
+
+# 6) SSL: check certs; if missing → issue process for new certs
+sh "$TOOLS_DIR/ssl/ensure-certs.sh" "$PROJECT"
+
+# 7) Install the rendered server block into nginx/conf.d
+INSTALLED_CONF="$(sh "$TOOLS_DIR/projects/install-server-conf.sh" "$PROJECT")"
+echo "[deploy] Installed nginx server config at: $INSTALLED_CONF"
+
+# 8) Syntax check full nginx config through running container
+sh "$TOOLS_DIR/nginx/test-config.sh"
+
+# 9) Reload Nginx
+sh "$TOOLS_DIR/nginx/reload.sh"
 
 echo "[deploy] Completed for project: $PROJECT"

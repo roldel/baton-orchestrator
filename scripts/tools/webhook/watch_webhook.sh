@@ -5,7 +5,7 @@
 set -eu
 
 # --- Configuration ---
-WATCH_DIR="/opt/baton-orchestrator/orchestrator/webhook-redeploy-instruct/"
+WATCH_DIR="/srv/webhooks/signals/"
 HANDLER="/opt/baton-orchestrator/scripts/tools/webhook/handle_webhook.sh"
 LOG="/var/log/baton-webhook.log"
 PATTERN='task_*.baton'  # expected filename pattern

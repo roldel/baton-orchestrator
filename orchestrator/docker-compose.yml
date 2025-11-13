@@ -1,8 +1,8 @@
 services:
 
   nginx:
-      image: nginx:alpine
       container_name: ingress-nginx
+      image: nginx:alpine
       restart: unless-stopped
       ports:
         - "80:80"
@@ -17,15 +17,21 @@ services:
         # Project-specific configs (generated at deploy, ignored in git)
         - ./nginx/conf.d:/etc/nginx/conf.d
 
-        # Certs & ACME
-        - ./data/certs:/etc/letsencrypt:ro
-        - ./data/certbot-webroot:/var/www/acme-challenge:ro
+        # Project-specific webhook configs (generated at deploy, ignored in git)
+        - /srv/baton-orchestrator/webhooks.d:/etc/nginx/webhooks.d/
+
+        # Letsencrtpt certs & ACME
+        - /etc/letsencrypt:/etc/letsencrypt:ro
+        - acme-webroot:/var/www/acme-challenge:ro
 
         # Shared assets for the different projects
-        - /shared-files/:/shared-files/:ro
+        - /srv/shared-files:/srv/shared-files:ro
 
       networks:
-        - internal_proxy_pass_network # Existing network for other projects
+        # Inter docker compose network
+        - internal_proxy_pass_network
+
+        # Inner docker compose networl
         - nginx_webhook_network
 
       healthcheck:
@@ -41,8 +47,9 @@ services:
     container_name: certbot
     restart: no
     volumes:
-    - ./data/certs:/etc/letsencrypt            
-    - ./data/certbot-webroot:/var/www/acme-challenge
+      # Letsencrtpt certs & ACME
+      - /etc/letsencrypt:/etc/letsencrypt            
+      - acme-webroot:/var/www/acme-challenge
 
 
   webhook:
@@ -51,10 +58,16 @@ services:
     container_name: webhook
     restart: unless-stopped
     volumes:
-      - ./webhook-redeploy-instruct/:/signal-to-host:rw
-      - ./webhook/projects:/app/projects:ro
+      # Inotify host signaler
+      - /srv/webhooks/signals:/signal-to-host:rw
+      
+      # Read-only access to all project directories to load full .env for task creation
+      - /srv/projects:/app/projects:ro
+      
+      # Webhook project data
+      #- /srv/webhooks/projects:/app/projects:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PORT:-5000}/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5000/health || exit 1"]
       interval: 10s
       timeout: 2s
       retries: 10
@@ -63,6 +76,9 @@ services:
         aliases:
           - orchestrator-webhook
 
+
+volumes:
+  acme-webroot:
 
 networks:
   internal_proxy_pass_network:

@@ -1,138 +1,105 @@
 #!/bin/sh
-# Irreversible cleanup; run as root
+# Cleanup / uninstall Baton Orchestrator runtime
+# - Does NOT touch /srv/projects
+# - Does NOT wipe /etc/letsencrypt
+# - Does NOT remove docker/crond from runlevels (you can do that manually if desired)
+
 set -eu
 
-# --- Root Check ---
+BASE_DIR="/opt/baton-orchestrator"
+ORCHESTRATOR_COMPOSE="$BASE_DIR/orchestrator/docker-compose.yml"
+
+INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
+WEBHOOK_LOG="/var/log/baton-webhook.log"
+WEBHOOK_PID="/run/baton-webhook.pid"
+
+echo "[cleanup] Baton Orchestrator cleanup starting..."
+
+# --- Root check ---
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: This script must be run as root." >&2
   exit 1
 fi
 
-# Resolve repo root (robust across symlinks)
-# Using realpath if available, otherwise fallback
-if command -v realpath >/dev/null 2>&1; then
-  REAL_PATH=$(realpath "$0")
+# --- Stop docker stack (nginx + webhook + certbot) ---
+if command -v docker >/dev/null 2>&1 && [ -f "$ORCHESTRATOR_COMPOSE" ]; then
+  echo "[cleanup] Stopping orchestrator docker-compose stack..."
+  docker compose -f "$ORCHESTRATOR_COMPOSE" down --remove-orphans --volumes || true
 else
-  # Fallback for systems without realpath (e.g., some minimal Alpine setups)
-  REAL_PATH=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+  echo "[cleanup] Skipping docker-compose stack teardown (docker or compose file missing)."
 fi
-REAL_DIR=$(CDPATH= cd -- "$(dirname -- "$REAL_PATH")" && pwd)
-BASE_DIR=$(CDPATH= cd -- "$REAL_DIR/.." && pwd)
 
-echo "Cleaning baton-orchestrator from: $BASE_DIR"
-echo "THIS WILL DELETE ALL CONFIGS, CERTS, AND SHARED FILES!"
-printf "Type YES to continue: "
-read -r confirm
-[ "$confirm" != "YES" ] && { echo "Aborted."; exit 1; }
+# --- Remove the dedicated docker network if possible ---
+if command -v docker >/dev/null 2>&1; then
+  if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
+    echo "[cleanup] Attempting to remove docker network: internal_proxy_pass_network"
+    if ! docker network rm internal_proxy_pass_network >/dev/null 2>&1; then
+      echo "[cleanup]   Could not remove internal_proxy_pass_network (likely still in use). Skipping."
+    fi
+  fi
+fi
 
-COMPOSE_FILE="$BASE_DIR/orchestrator/docker-compose.yml"
-# Define paths for new components from setup.sh
-CRON_WRAPPER_DEST="/etc/periodic/daily/baton-ssl-renewal"
-INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
-BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
-OLD_WEBHOOK_PID_FILE="$BASE_DIR/.webhook-watcher.pid" # Keep for compatibility, though OpenRC manages PID now
-
-# -------------------------------
-# 1. Stop and disable baton-webhook OpenRC service
-# -------------------------------
-if [ -f "$INIT_D_SERVICE_FILE" ]; then
-  echo "[cleanup] Stopping and disabling baton-webhook service…"
-  # Use 'stop' command of the service script
+# --- OpenRC baton-webhook service cleanup ---
+if command -v rc-service >/dev/null 2>&1; then
   if rc-service baton-webhook status >/dev/null 2>&1; then
+    echo "[cleanup] Stopping baton-webhook service..."
     rc-service baton-webhook stop || true
   fi
-  # Remove from default runlevels
+fi
+
+if command -v rc-update >/dev/null 2>&1; then
   if rc-update show | grep -q "baton-webhook"; then
-    rc-update del "baton-webhook" "default" || true
+    echo "[cleanup] Removing baton-webhook from default runlevel..."
+    rc-update del baton-webhook default || true
   fi
+fi
+
+if [ -f "$INIT_D_SERVICE_FILE" ]; then
+  echo "[cleanup] Removing OpenRC service file: $INIT_D_SERVICE_FILE"
   rm -f "$INIT_D_SERVICE_FILE"
-  echo "[cleanup] Removed $INIT_D_SERVICE_FILE"
-fi
-# Remove the associated log file
-if [ -f "$BATON_WEBHOOK_LOG_FILE" ]; then
-  rm -f "$BATON_WEBHOOK_LOG_FILE"
-  echo "[cleanup] Removed $BATON_WEBHOOK_LOG_FILE"
 fi
 
-# Compatibility: Remove old webhook inotify watcher PID file if it exists
-if [ -f "$OLD_WEBHOOK_PID_FILE" ]; then
-    PID=$(cat "$OLD_WEBHOOK_PID_FILE")
-    echo "[cleanup] Stopping old webhook watcher (PID: $PID) if still running…"
-    kill "$PID" 2>/dev/null || true
-    rm -f "$OLD_WEBHOOK_PID_FILE"
-fi
+# --- Cron job cleanup ---
+TARGET_RENEW="/etc/periodic/daily/baton-cert-renew"
 
-# -------------------------------
-# 2. Remove SSL Renewal Cron Job
-# -------------------------------
-if [ -f "$CRON_WRAPPER_DEST" ]; then
-  echo "[cleanup] Removing SSL renewal cron job: $CRON_WRAPPER_DEST"
-  rm -f "$CRON_WRAPPER_DEST"
-fi
-# Also remove the specific log file for cert renewal if it exists
-if [ -f "$BASE_DIR/logs/cert-renewal.log" ]; then
-  rm -f "$BASE_DIR/logs/cert-renewal.log"
-  echo "[cleanup] Removed $BASE_DIR/logs/cert-renewal.log"
+if [ -f "$TARGET_RENEW" ]; then
+    echo "[cleanup] Removing cert renewal periodic script..."
+    rm -f "$TARGET_RENEW"
 fi
 
 
-# -------------------------------
-# 3. Stop Docker stack
-# -------------------------------
-if [ -f "$COMPOSE_FILE" ] && docker info >/dev/null 2>&1; then
-  echo "Stopping orchestrator services (nginx, webhook, etc.)..."
-  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
-else
-  echo "Orchestrator Docker Compose not found or Docker not running; skipping stack down."
-fi
+# --- Remove log / pid ---
+[ -f "$WEBHOOK_LOG" ] && rm -f "$WEBHOOK_LOG" || true
+[ -f "$WEBHOOK_PID" ] && rm -f "$WEBHOOK_PID" || true
 
-# -------------------------------
-# 4. Remove Docker network
-# -------------------------------
-if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-  echo "Removing network: internal_proxy_pass_network"
-  docker network rm internal_proxy_pass_network || true
-else
-  echo "Docker network internal_proxy_pass_network not found; skipping removal."
-fi
+# --- Remove orchestrator runtime directories (safe ones only) ---
+echo "[cleanup] Removing orchestrator runtime directories..."
 
-# -------------------------------
-# 5. Remove orchestrator data directories
-# -------------------------------
-echo "Removing orchestrator data directories..."
+# Temporary + generated nginx configs
 rm -rf \
-  "$BASE_DIR/orchestrator/data" \
-  "$BASE_DIR/orchestrator/server-confs" \
-  "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
-  "$BASE_DIR/logs" \
-  2>/dev/null || true
+  "$BASE_DIR/tmp" \
+  "$BASE_DIR/orchestrator/nginx/conf.d" 2>/dev/null || true
 
-# -------------------------------
-# 6. Remove shared files directory (if created by setup)
-# -------------------------------
-if [ -d /shared-files ]; then
-  echo "Removing /shared-files (all static/media)"
-  # Be careful here: only remove if it's empty or you're absolutely sure
-  # it was created by baton and only contains baton-related files.
-  # For safety, you might want to only remove its *contents* or ask user confirmation.
-  # Given the prompt, we'll assume a full removal is intended.
-  rm -rf /shared-files/*
-  rmdir /shared-files 2>/dev/null || true # rmdir only removes empty directories
-fi
+# Webhook helper dirs used by the watcher / service
+rm -rf \
+  /opt/baton-orchestrator/webhook-redeploy-instruct 2>/dev/null || true
 
-# -------------------------------
-# 7. Optional: delete entire repo
-# -------------------------------
-printf "Remove entire repo directory? (YES to delete $BASE_DIR): "
-read -r remove_repo
-if [ "$remove_repo" = "YES" ]; then
-  # It's safer to use the absolute path directly than `cd /` then `rm`.
-  # This also ensures the script deletes the correct directory even if `cd /` somehow failed.
-  rm -rf "$BASE_DIR"
-  echo "Deleted $BASE_DIR"
-else
-  echo "Repo kept at $BASE_DIR"
+# Old/alternate webhook host dirs (these do not overlap /srv/projects)
+rm -rf \
+  /srv/baton-orchestrator \
+  /srv/webhooks/signals \
+  /srv/webhooks/projects 2>/dev/null || true
+
+# --- Remove leftover backup dirs created by handle-webhook.sh ---
+if [ -d /srv/tmp ]; then
+  echo "[cleanup] Removing baton backup directories in /srv/tmp..."
+  # ignore errors if none exist
+  find /srv/tmp -maxdepth 1 -type d -name "baton-backup.*" -exec rm -rf {} + 2>/dev/null || true
 fi
 
 echo
-echo "Cleanup complete."
+echo "[cleanup] Baton Orchestrator cleanup completed."
+echo "[cleanup] NOTE: /srv/projects was NOT modified."
+echo "[cleanup] NOTE: /srv/shared-files and /etc/letsencrypt were NOT touched."
+echo "[cleanup] If you also want to remove /opt/baton-orchestrator entirely, you can do so manually:"
+echo "         rm -rf /opt/baton-orchestrator"

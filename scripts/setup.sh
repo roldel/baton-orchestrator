@@ -1,8 +1,6 @@
 #!/bin/sh
-# Run once as root on Alpine (OpenRC)
-set -eu
-: "${BASE_DIR:=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
-echo "Setting up baton-orchestrator in: $BASE_DIR"
+
+BASE_DIR="/opt/baton-orchestrator"
 
 # --- Root Check ---
 if [ "$(id -u)" -ne 0 ]; then
@@ -10,21 +8,20 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-#-------------#
-# Dependencies
-#-------------#
+# --- Dependencies --- 
 if command -v apk >/dev/null 2>&1; then
   echo "Installing required packages via apk..."
   apk update >/dev/null
   apk add --no-cache \
-    docker \
-    docker-cli-compose \
-    git \
-    gettext \
-    openssl \
-    inotify-tools >/dev/null \
-    busybox \
-    busybox-openrc
+  docker \
+  docker-cli-compose \
+  git \
+  gettext \
+  openssl \
+  inotify-tools \
+  busybox \
+  busybox-openrc >/dev/null
+
 else
   echo "apk not found; skipping package install (this script targets Alpine)."
 fi
@@ -37,50 +34,43 @@ for cmd in docker rc-update rc-service crond; do
   fi
 done
 
-#----------------#
-# Host filesystem
-#----------------#
+#--- Host filesystem ---
 echo "Creating required directories..."
 mkdir -p \
-  "$BASE_DIR/orchestrator/data/certs" \
-  "$BASE_DIR/orchestrator/data/certbot-webroot" \
-  "$BASE_DIR/orchestrator/server-confs" \
-  "$BASE_DIR/orchestrator/webhook-redeploy-instruct" \
-  /shared-files \
-  "$BASE_DIR/logs"
+  "/srv/projects" \
+  "/srv/shared-files" \
+  "/srv/baton-orchestrator/webhooks.d" \
+  "/srv/webhooks/signals" \
+  "/etc/letsencrypt" \
+  "/opt/baton-orchestrator/tmp/rendered"
 
-#--------------------#
-# Docker prerequisites
-#--------------------#
+
+# --- Docker prerequisites ---
 echo "Ensuring Docker is enabled and running..."
 rc-update add docker default >/dev/null || true
 rc-service docker start || true
-if command -v docker >/dev/null 2>&1; then
-  # Create network if missing
-  if ! docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-    echo "Creating Docker network: internal_proxy_pass_network"
-    docker network create internal_proxy_pass_network
-  else
-    echo "Network already exists: internal_proxy_pass_network"
-  fi
-  # Optional: verify compose v2
-  if ! docker compose version >/dev/null 2>&1; then
-    echo "WARNING: 'docker compose' not available. Ensure docker-cli-compose is installed."
-  fi
+
+# Create network if missing
+if ! docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
+  echo "Creating Docker network: internal_proxy_pass_network"
+  docker network create internal_proxy_pass_network
 else
-  echo "WARNING: Docker not found on PATH. Install/enable Docker before deploying."
+  echo "Network already exists: internal_proxy_pass_network"
 fi
 
-#--------------------#
-# Crond prerequisites
-#--------------------#
+# Optional: verify compose v2
+if ! docker compose version >/dev/null 2>&1; then
+  echo "WARNING: 'docker compose' not available. Ensure docker-cli-compose is installed."
+fi
+
+
+# --- Crond prerequisites ---
 echo "Ensuring crond is enabled and running..."
 rc-update add crond default >/dev/null || true
 rc-service crond start || true
 
-#--------------------#
-# Orchestrator Services: Clean Start
-#--------------------#
+
+# --- Orchestrator Services: Clean Start ---
 ORCHESTRATOR_COMPOSE="$BASE_DIR/orchestrator/docker-compose.yml"
 if [ -f "$ORCHESTRATOR_COMPOSE" ]; then
   echo "Stopping any existing orchestrator services (clean state)..."
@@ -92,23 +82,20 @@ else
   exit 1
 fi
 
-#--------------------#
-# SSL Renewal Cron Job
-#--------------------#
-WRAPPER_TEMPLATE_SRC="$BASE_DIR/scripts/tools/cron-wrappers/renew-certs-daily.sh"
-CRON_WRAPPER_DEST="/etc/periodic/daily/baton-ssl-renewal"
-RENEWAL_LOG="$BASE_DIR/logs/cert-renewal.log"
-echo "Installing daily SSL renewal job..."
-[ -f "$WRAPPER_TEMPLATE_SRC" ] || { echo "ERROR: Missing wrapper template: $WRAPPER_TEMPLATE_SRC" >&2; exit 1; }
-cp "$WRAPPER_TEMPLATE_SRC" "$CRON_WRAPPER_DEST"
-sed -i "s|{{BATON_PROJECT_ROOT}}|$(printf '%s\n' "$BASE_DIR" | sed -e 's/[]\/$*.^[]/\\&/g')|" "$CRON_WRAPPER_DEST"
-chmod 755 "$CRON_WRAPPER_DEST"
-echo "  Installed: $CRON_WRAPPER_DEST (runs with system's daily periodic cron)"
-echo "  Logs:      $RENEWAL_LOG"
+# --- SSL Renewal Cron Job ---
+# --- Install daily cert renewal script ---
+SOURCE_RENEW="/opt/baton-orchestrator/scripts/tools/ssl/cron-renew-certs.sh"
+TARGET_RENEW="/etc/periodic/daily/baton-cert-renew"
 
-#--------------------#
-# Baton Webhook Service (OpenRC)
-#--------------------#
+echo "Installing daily certificate renewal script..."
+
+cp "$SOURCE_RENEW" "$TARGET_RENEW"
+chmod 755 "$TARGET_RENEW"
+
+
+
+# --- Baton Webhook Service (OpenRC) --- 
+
 BATON_WEBHOOK_SERVICE_FILE="$BASE_DIR/scripts/tools/webhook/service-file.sh"
 INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
 BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
@@ -128,13 +115,12 @@ touch "$BATON_WEBHOOK_LOG_FILE"
 chmod 644 "$BATON_WEBHOOK_LOG_FILE"
 rc-service baton-webhook start
 
-#--------------------#
-# Completion
-#--------------------#
+
+# --- Completion ---
 echo
 echo "Setup complete!"
 echo "   Nginx is running"
 echo "   Webhook service is running"
-echo "   baton-webhook is running (logs: /var/log/baton-webhook.log)"
+#echo "   baton-webhook is running (logs: /var/log/baton-webhook.log)"
 echo "   Certbot will start on-demand during first deploy"
 echo "   Run: ./scripts/cmd/deploy.sh <project-name>"

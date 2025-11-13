@@ -45,6 +45,13 @@ if [ -z "${DOMAIN_NAME:-}" ]; then
     exit 1
 fi
 
+# NORMALIZE DOMAIN_ALIASES: convert commas to spaces
+if [ -n "${DOMAIN_ALIASES:-}" ]; then
+    DOMAIN_ALIASES_NORMALIZED=$(printf '%s\n' "$DOMAIN_ALIASES" | tr ',' ' ' | tr -s ' ')
+    export DOMAIN_ALIASES="$DOMAIN_ALIASES_NORMALIZED"
+    echo "[render-server-conf] Normalized DOMAIN_ALIASES: '$DOMAIN_ALIASES'"
+fi
+
 TEMP_RENDER="$TMP_DIR/${DOMAIN_NAME}.conf"
 
 echo "[render-server-conf] Rendering server.conf → $TEMP_RENDER"

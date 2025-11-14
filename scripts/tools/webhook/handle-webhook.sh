@@ -1,4 +1,4 @@
-# /opt/baton-orchestrator/scripts/tools/webhook/handle_webhook.sh
+# /opt/baton-orchestrator/scripts/tools/webhook/handle-webhook.sh
 #!/bin/sh
 set -eu
 

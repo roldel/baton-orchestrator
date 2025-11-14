@@ -1,12 +1,12 @@
 #!/bin/sh
 # /opt/baton-orchestrator/scripts/tools/webhook/watch_webhook.sh
-# Watches a directory for task_*.baton files and processes them via handle_webhook.sh
+# Watches a directory for task_*.baton files and processes them via handle-webhook.sh
 
 set -eu
 
 # --- Configuration ---
 WATCH_DIR="/srv/webhooks/signals/"
-HANDLER="/opt/baton-orchestrator/scripts/tools/webhook/handle_webhook.sh"
+HANDLER="/opt/baton-orchestrator/scripts/tools/webhook/handle-webhook.sh"
 LOG="/var/log/baton-webhook.log"
 PATTERN='task_*.baton'  # expected filename pattern
 

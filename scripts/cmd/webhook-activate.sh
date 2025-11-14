@@ -29,8 +29,11 @@ sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" \
     DOMAIN_NAME WEBHOOK_URL PAYLOAD_SIGNATURE
 
 # 3. Load project env
-# shellcheck source=/dev/null
+# --- Load .env and export everything so envsubst can see them ---
+set -a # Start auto-exporting
+# shellcheck source=/dev/null # This is an intentional source
 . "$ENV_FILE"
+set +a # Stop auto-exporting
 
 # 4. Validate the format of WEBHOOK_URL
 "$VALIDATE_WEBHOOK_URL" "$WEBHOOK_URL"
@@ -56,7 +59,7 @@ fi
 mkdir -p "$WEBHOOK_DIR"
 
 echo "[webhook-activate] Enabling ${DOMAIN_NAME} → ${WEBHOOK_URL}"
-envsubst '$DOMAIN_NAME $WEBHOOK_URL' < "$TEMPLATE" > "$TARGET_CONF"
+envsubst '${DOMAIN_NAME} ${WEBHOOK_URL}' < "$TEMPLATE" > "$TARGET_CONF"
 
 # 7. ATOMIC: test config — on failure, remove what we just wrote
 if ! sh "$TOOLS_DIR/nginx/test-config.sh"; then

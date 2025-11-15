@@ -27,6 +27,20 @@ SIGNAL_TO_HOST_DIR = os.environ.get(
 def health():
     return "OK", 200
 
+
+
+# NEW ENDPOINT FOR TESTING
+@app.post("/write")
+def write_test_file():
+    try:
+        test_filename = os.path.join(SIGNAL_TO_HOST_DIR, "test_file_simple.baton")
+        with open(test_filename, "w") as f:
+            f.write("This is a test file created by Flask.\n")
+        return f"Test file created: {test_filename}", 200
+    except Exception as e:
+        abort(500, description=f"Failed to create test file: {str(e)}")
+
+
 @app.post("/webhook")
 def webhook():
     from utils import process_webhook_request

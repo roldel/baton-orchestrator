@@ -40,16 +40,6 @@ def write_test_file():
     except Exception as e:
         abort(500, description=f"Failed to create test file: {str(e)}")
 
-@app.post("/write")
-def write_test_file():
-    try:
-        # Renamed to distinguish from atomic test
-        test_filename = os.path.join(SIGNAL_TO_HOST_DIR, "test_file_atomic.baton")
-        with open(test_filename, "w") as f:
-            f.write("This is a test file created by Flask simply.\n")
-        return f"Simple test file created: {test_filename}", 200
-    except Exception as e:
-        abort(500, description=f"Failed to create simple test file: {str(e)}")
 
 # NEW ENDPOINT FOR ATOMIC TESTING
 @app.post("/write-atomic")

@@ -96,24 +96,24 @@ chmod 755 "$TARGET_RENEW"
 
 # --- Baton Webhook Service (OpenRC) --- 
 
-BATON_WEBHOOK_SERVICE_FILE="$BASE_DIR/scripts/tools/webhook/service-file.sh"
-INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
-BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
-echo "Setting up baton-webhook service..."
-if rc-service baton-webhook status >/dev/null 2>&1; then
-  echo "  Stopping existing baton-webhook service..."
-  rc-service baton-webhook stop || true
-fi
-if rc-update show | grep -q "baton-webhook"; then
-  echo "  Removing existing baton-webhook from runlevels..."
-  rc-update del "baton-webhook" "default" || true
-fi
-cp -f "$BATON_WEBHOOK_SERVICE_FILE" "$INIT_D_SERVICE_FILE"
-chmod +x "$INIT_D_SERVICE_FILE"
-rc-update add "baton-webhook" "default"
-touch "$BATON_WEBHOOK_LOG_FILE"
-chmod 644 "$BATON_WEBHOOK_LOG_FILE"
-rc-service baton-webhook start
+#BATON_WEBHOOK_SERVICE_FILE="$BASE_DIR/scripts/tools/webhook/service-file.sh"
+#INIT_D_SERVICE_FILE="/etc/init.d/baton-webhook"
+#BATON_WEBHOOK_LOG_FILE="/var/log/baton-webhook.log"
+#echo "Setting up baton-webhook service..."
+#if rc-service baton-webhook status >/dev/null 2>&1; then
+#  echo "  Stopping existing baton-webhook service..."
+#  rc-service baton-webhook stop || true
+#fi
+#if rc-update show | grep -q "baton-webhook"; then
+#  echo "  Removing existing baton-webhook from runlevels..."
+#  rc-update del "baton-webhook" "default" || true
+#fi
+#cp -f "$BATON_WEBHOOK_SERVICE_FILE" "$INIT_D_SERVICE_FILE"
+#chmod +x "$INIT_D_SERVICE_FILE"
+#rc-update add "baton-webhook" "default"
+#touch "$BATON_WEBHOOK_LOG_FILE"
+#chmod 644 "$BATON_WEBHOOK_LOG_FILE"
+#rc-service baton-webhook start
 
 
 # --- Completion ---

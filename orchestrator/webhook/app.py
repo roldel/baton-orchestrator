@@ -44,7 +44,7 @@ def write_test_file():
 def write_test_file():
     try:
         # Renamed to distinguish from atomic test
-        test_filename = os.path.join(SIGNAL_TO_HOST_DIR, "test_file_simple.txt")
+        test_filename = os.path.join(SIGNAL_TO_HOST_DIR, "test_file_atomic.baton")
         with open(test_filename, "w") as f:
             f.write("This is a test file created by Flask simply.\n")
         return f"Simple test file created: {test_filename}", 200

@@ -1,0 +1,111 @@
+#!/bin/sh
+# /usr/local/bin/baton
+# Global CLI entry point for Baton Orchestrator.
+# Dispatches subcommands to the appropriate script under /opt/baton-orchestrator/scripts/.
+#
+# Usage:
+#   baton <command> [arguments]
+#
+# Examples:
+#   baton deploy <project>
+#   baton deploy <project> --webhook
+#   baton stand-down <project>
+#   baton respawn <project>
+#   baton rebuild-all
+#   baton rebuild-all --mode dynamic --dry-run
+#   baton status
+#   baton status <project>
+#   baton remove-project <project>
+#   baton remove-project <project> --delete-files
+#   baton webhook-activate <project>
+#   baton webhook-deactivate <project>
+#   baton orchestrator-respawn
+#   baton setup
+#   baton cleanup
+
+set -eu
+
+BASE_DIR="/opt/baton-orchestrator"
+CMD_DIR="$BASE_DIR/scripts/cmd"
+SCRIPTS_DIR="$BASE_DIR/scripts"
+
+# --- Usage ---
+usage() {
+    cat <<EOF
+Usage: baton <command> [arguments]
+
+Project commands:
+  deploy <project> [--webhook]           Deploy or update a project
+  stand-down <project>                   Disable a project (keeps SSL)
+  respawn <project>                      Full stop → rebuild → redeploy
+  rebuild-all [--mode dynamic|static]    Respawn all projects
+               [--dry-run]
+  status [project]                       Show status of all (or one) project(s)
+  remove-project <project>               Remove a project from Baton
+                 [--delete-files]
+
+Webhook commands:
+  webhook-activate <project>             Activate webhook for a project
+  webhook-deactivate <project>           Deactivate webhook for a project
+
+Orchestrator commands:
+  orchestrator-respawn                   Rebuild the orchestrator stack
+  setup                                  Initialize Baton on this host
+  cleanup                                Remove Baton runtime (irreversible)
+
+EOF
+}
+
+# --- Require at least one argument ---
+if [ $# -lt 1 ]; then
+    usage
+    exit 1
+fi
+
+COMMAND="$1"
+shift  # remaining args passed through to the target script
+
+case "$COMMAND" in
+    deploy)
+        exec sh "$CMD_DIR/deploy.sh" "$@"
+        ;;
+    stand-down)
+        exec sh "$CMD_DIR/stand-down.sh" "$@"
+        ;;
+    respawn)
+        exec sh "$CMD_DIR/respawn.sh" "$@"
+        ;;
+    rebuild-all)
+        exec sh "$CMD_DIR/rebuild-all.sh" "$@"
+        ;;
+    status)
+        exec sh "$CMD_DIR/status.sh" "$@"
+        ;;
+    remove-project)
+        exec sh "$CMD_DIR/remove-project.sh" "$@"
+        ;;
+    webhook-activate)
+        exec sh "$CMD_DIR/webhook-activate.sh" "$@"
+        ;;
+    webhook-deactivate)
+        exec sh "$CMD_DIR/webhook-deactivate.sh" "$@"
+        ;;
+    orchestrator-respawn)
+        exec sh "$CMD_DIR/orchestrator-compose-respawn.sh" "$@"
+        ;;
+    setup)
+        exec sh "$SCRIPTS_DIR/setup.sh" "$@"
+        ;;
+    cleanup)
+        exec sh "$SCRIPTS_DIR/cleanup.sh" "$@"
+        ;;
+    help|--help|-h)
+        usage
+        exit 0
+        ;;
+    *)
+        echo "baton: unknown command '$COMMAND'" >&2
+        echo "Run 'baton help' for available commands." >&2
+        exit 1
+        ;;
+esac

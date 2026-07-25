@@ -1,0 +1,99 @@
+services:
+
+  nginx:
+      container_name: ingress-nginx
+      image: nginx:alpine
+      restart: unless-stopped
+      ports:
+        - "80:80"
+        - "443:443"
+      volumes:
+        # Main NGINX config
+        - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+        # Admin/orchestrator configs (tracked in git)
+        - ./nginx/admin-conf.d:/etc/nginx/admin-conf.d:ro
+
+        # Project-specific configs (generated at deploy, ignored in git)
+        - ./nginx/conf.d:/etc/nginx/conf.d
+
+        # Project-specific webhook configs (generated at deploy, ignored in git)
+        - /srv/baton-orchestrator/webhooks.d:/etc/nginx/webhooks.d/
+
+        # Letsencrtpt certs & ACME
+        - /etc/letsencrypt:/etc/letsencrypt:ro
+        - acme-webroot:/var/www/acme-challenge:ro
+
+        # Shared assets for the different projects
+        - /srv/shared-files:/srv/shared-files:ro
+
+      networks:
+        # Inter docker compose network
+        - internal_proxy_pass_network
+
+        # Inner docker compose networl
+        - nginx_webhook_network
+
+      healthcheck:
+        test: ["CMD", "wget", "--spider", "-q", "http://0.0.0.0/health"]
+        interval: 10s
+        timeout: 3s
+        retries: 3
+        start_period: 5s
+
+      logging:
+        driver: json-file
+        options:
+          max-size: "10m"   
+          max-file: "5"
+
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    restart: no
+    volumes:
+      # Letsencrtpt certs & ACME
+      - /etc/letsencrypt:/etc/letsencrypt            
+      - acme-webroot:/var/www/acme-challenge
+
+
+  webhook:
+    build:
+      context: ./webhook
+    container_name: webhook
+    restart: unless-stopped
+    volumes:
+      # Inotify host signaler
+      - /srv/webhooks/signals:/signal-to-host:rw
+      
+      # Read-only access to all project directories to load full .env for task creation
+      - /srv/projects:/app/projects:ro
+      
+      # Webhook project data
+      #- /srv/webhooks/projects:/app/projects:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://0.0.0.0:5000/health || exit 1"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+    networks:
+      nginx_webhook_network:
+        aliases:
+          - orchestrator-webhook
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+
+volumes:
+  acme-webroot:
+
+networks:
+  internal_proxy_pass_network:
+    external: true
+
+  nginx_webhook_network:
+    driver: bridge

@@ -1,0 +1,36 @@
+services:
+
+  db: #secondary-service(db,tools,...)
+    
+    #...
+    env_file:
+      - .env
+    # Needs to be added on a default network to communicate with primary service
+    networks:
+      default: {}
+
+
+  django: #application server (django,ruby,laravel...)
+
+    #...
+    env_file:
+      - .env
+    # Expected volume mapping for project static files
+    volumes:
+      - /srv/shared-files/${DOMAIN_NAME}/static:/static_files:rw
+      - /srv/shared-files/${DOMAIN_NAME}/media:/media:rw
+    # Define networks as follow
+    networks:
+      # Default network to communicate with secondary services
+      default: {}
+      # External network to communicate with main orchestrator docker compose
+      internal_proxy_pass_network:
+        aliases:
+          - ${DOCKER_NETWORK_SERVICE_ALIAS}
+
+
+# Add network definition in footer
+networks:
+  default: {}
+  internal_proxy_pass_network:
+    external: true

@@ -64,8 +64,8 @@ services:
     container_name: webhook
     restart: unless-stopped
     volumes:
-      # Inotify host signaler
-      - /srv/webhooks/signals:/signal-to-host:rw
+      # Durable redeploy queue (Flask enqueues task_*.baton; host worker drains)
+      - /srv/webhooks/queue:/signal-to-host:rw
       
       # Read-only access to all project directories to load full .env for task creation
       - /srv/projects:/app/projects:ro

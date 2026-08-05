@@ -2,8 +2,8 @@
 # Validate project content:
 # - .env present
 # - server.conf present
-# - a docker compose file present (with flexible naming) — skipped for
-#   STATIC_SITE=yes projects, which have no container to run
+# - docker compose file(s) present (auto-detect or DOCKER_COMPOSE_FILES) —
+#   skipped for STATIC_SITE=yes projects, which have no container to run
 set -eu
 
 if [ $# -lt 1 ]; then
@@ -14,7 +14,7 @@ fi
 PROJECT="$1"
 PROJECT_DIR="/srv/projects/$PROJECT"
 BASE_DIR="/opt/baton-orchestrator"
-COMPOSE_HELPER="$BASE_DIR/scripts/tools/helpers/detect-compose-file.sh"
+RESOLVE_HELPER="$BASE_DIR/scripts/tools/helpers/resolve-compose-files.sh"
 DETECT_STATIC_SITE="$BASE_DIR/scripts/tools/projects/detect-static-site.sh"
 
 echo "[validate-content] Validating content for project: $PROJECT_DIR"
@@ -40,19 +40,24 @@ if [ ! -f "$SERVER_CONF" ]; then
   exit 1
 fi
 
-# --- Docker Compose file (via shared helper) — not required for static sites ---
+# --- Docker Compose file(s) (via shared helper) — not required for static sites ---
 STATIC_SITE="$(sh "$DETECT_STATIC_SITE" "$PROJECT")"
 
 if [ "$STATIC_SITE" = "yes" ]; then
   echo "[validate-content] Static site — skipping docker compose file requirement"
 else
-  if [ ! -x "$COMPOSE_HELPER" ]; then
-    echo "[validate-content] ERROR: detect-compose-file helper not found or not executable: $COMPOSE_HELPER" >&2
+  if [ ! -f "$RESOLVE_HELPER" ]; then
+    echo "[validate-content] ERROR: resolve-compose-files helper not found: $RESOLVE_HELPER" >&2
     exit 1
   fi
 
-  COMPOSE_FILE="$(sh "$COMPOSE_HELPER" "$PROJECT_DIR")"
-  echo "[validate-content] Found compose file: $COMPOSE_FILE"
+  # Capture first so a resolve failure aborts under set -e (pipe would hide it)
+  COMPOSE_FILES="$(sh "$RESOLVE_HELPER" "$PROJECT_DIR")"
+  echo "[validate-content] Found compose file(s):"
+  printf '%s\n' "$COMPOSE_FILES" | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    echo "[validate-content]   - $f"
+  done
 fi
 
 echo "[validate-content] Project content validation OK."

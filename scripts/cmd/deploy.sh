@@ -43,8 +43,12 @@ STATIC_SITE="$(sh "$TOOLS_DIR/projects/detect-static-site.sh" "$PROJECT")"
 echo "[deploy] Static site: $STATIC_SITE"
 
 if [ "$STATIC_SITE" != "yes" ]; then
-  COMPOSE_FILE="$(sh "$TOOLS_DIR/helpers/detect-compose-file.sh" "$PROJECT_DIR")"
-  echo "[deploy] Using compose file: $COMPOSE_FILE"
+  COMPOSE_FILES="$(sh "$TOOLS_DIR/helpers/resolve-compose-files.sh" "$PROJECT_DIR")"
+  echo "[deploy] Using compose file(s):"
+  printf '%s\n' "$COMPOSE_FILES" | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    echo "[deploy]   - $f"
+  done
 fi
 
 # 3) Env validation — DOMAIN vars always required; static vs dynamic adds the rest

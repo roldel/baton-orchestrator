@@ -41,7 +41,10 @@ mkdir -p \
   "/srv/projects" \
   "/srv/shared-files" \
   "/srv/baton-orchestrator/webhooks.d" \
-  "/srv/webhooks/signals" \
+  "/srv/webhooks/queue" \
+  "/srv/webhooks/processing" \
+  "/srv/webhooks/processed" \
+  "/srv/webhooks/failed" \
   "/etc/letsencrypt" \
   "/opt/baton-orchestrator/tmp/rendered"
 

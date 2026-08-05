@@ -19,7 +19,8 @@ PROJECTS_ROOT="/srv/projects"
 NGINX_CONF_DIR="$BASE_DIR/orchestrator/nginx/conf.d"
 WEBHOOKS_DIR="/srv/baton-orchestrator/webhooks.d"
 CERT_BASE="/etc/letsencrypt/live"
-COMPOSE_HELPER="$BASE_DIR/scripts/tools/helpers/detect-compose-file.sh"
+COMPOSE_CMD="$BASE_DIR/scripts/tools/helpers/compose-cmd.sh"
+RESOLVE_HELPER="$BASE_DIR/scripts/tools/helpers/resolve-compose-files.sh"
 
 # --- Colour / formatting helpers (degrade gracefully if no tty) ---
 if [ -t 1 ]; then
@@ -105,15 +106,13 @@ for PROJECT in $PROJECTS; do
     elif ! command -v docker >/dev/null 2>&1; then
         CONTAINERS_COL="$(warn 'no docker')"
     else
-        COMPOSE_FILE="$(sh "$COMPOSE_HELPER" "$PROJECT_DIR" 2>/dev/null || true)"
-
-        if [ -z "$COMPOSE_FILE" ]; then
+        if ! sh "$RESOLVE_HELPER" "$PROJECT_DIR" >/dev/null 2>&1; then
             CONTAINERS_COL="$(warn 'no compose')"
         else
-            # Use `docker compose ps` against the actual file — most reliable approach
-            RUNNING="$(docker compose -f "$COMPOSE_FILE" ps --status running \
+            # Use `docker compose ps` against the resolved file list
+            RUNNING="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --status running \
                            --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
-            STOPPED="$(docker compose -f "$COMPOSE_FILE" ps --status exited --status stopped \
+            STOPPED="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --status exited --status stopped \
                            --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
             TOTAL=$((RUNNING + STOPPED))
 

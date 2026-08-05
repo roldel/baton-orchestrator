@@ -167,6 +167,16 @@ DOCKER_COMPOSE_RESTART_REQUIRED=NO # Auto rebuild and restart docker compose clu
 TARGET_BRANCH=main
 COMMIT_DOCKER_COMPOSE_RESTART_TRIGGER=[restart-compose] # If DOCKER_COMPOSE_RESTART_REQUIRED=NO, allow possibility to trigger docker compose rebuild and restart on demand through commit message flag
 
+# Multi-file compose (optional). Comma- or colon-separated paths relative to the
+# project dir (or absolute). Order matters: later files override earlier ones.
+# When set, Baton passes every file as `docker compose -f …` for up/down/restart/status.
+# Required for override stacks — Compose does NOT auto-load docker-compose.override.yml
+# once any -f is used (and Baton always uses -f).
+# Example: DOCKER_COMPOSE_FILES=docker-compose.yml,docker-compose.override.yml
+# Example: DOCKER_COMPOSE_FILES=compose.yml:compose.prod.yml
+# If unset, auto-detects a single file: docker-compose.yml|.yaml or compose.yml|.yaml
+# DOCKER_COMPOSE_FILES=docker-compose.yml,docker-compose.override.yml
+
 CI_PIPELINE_LOCATION=/srv/ci/pipelines/myproject # If CI pipeline to be implemented
 
 CUSTOM_REDEPLOY_SCRIPT_LOCATION=/srv/scripts/redeploy_myproject.sh # If non standard redeploy script to be executed
@@ -417,7 +427,9 @@ Each subdomain project gets its **own** everything: a TLS cert (issued per subdo
 
 ### Webhook auto-deploy
 
-Both paths — dynamic and static — support **push-to-deploy**. Activate it per project with `webhook-activate.sh <project>` once the site is live; it requires `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE` in the project's `.env`. On a matching push, the webhook worker identifies the project by its `Host` header, verifies the GitHub HMAC signature (`X-Hub-Signature-256`), checks the branch against `TARGET_BRANCH`, and triggers a redeploy. For static sites, `CI_PIPELINE_LOCATION` (if set) runs before the static sync so the served build is freshly rebuilt. See the `.env` blocks above for the webhook fields.
+Both paths — dynamic and static — support **push-to-deploy**. Activate it per project with `webhook-activate.sh <project>` once the site is live; it requires `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE` in the project's `.env`. On a matching push, the webhook worker identifies the project by its `Host` header, verifies the GitHub HMAC signature (`X-Hub-Signature-256`), checks the branch against `TARGET_BRANCH`, and **enqueues** a redeploy task. For static sites, `CI_PIPELINE_LOCATION` (if set) runs before the static sync so the served build is freshly rebuilt. See the `.env` blocks above for the webhook fields.
+
+**Queue (no dropped concurrent webhooks):** the Flask webhook container only writes an atomic `task_*.baton` file under `/srv/webhooks/queue/` (unique name: timestamp + pid + short uuid + project). A single host-side worker (`baton-webhook` / `watch-webhook.sh`) claims tasks one at a time (`queue/` → `processing/`), runs `handle-webhook.sh`, and archives results under `processed/` (or `failed/` if a task is left stranded). Waiting uses inotify plus a timed re-scan so a race can never leave work unprocessed. On worker restart, anything left in `processing/` is reclaimed back into the queue; leftover files under the legacy `signals/` path are migrated the same way. If several tasks for the **same project** pile up, the worker **coalesces** them: only the newest is run; older duplicates are archived as `*.coalesced.<ts>` under `processed/`.
 
 ---
 

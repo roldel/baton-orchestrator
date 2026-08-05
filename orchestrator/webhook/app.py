@@ -13,6 +13,8 @@ WEBHOOK_PROJECTS_DIR = os.environ.get(
     os.path.join(os.path.dirname(__file__), "projects"), # Resolves to /app/projects
 )
 
+# Host path is /srv/webhooks/queue (bind-mounted). The host-side worker
+# claims files from this directory into processing/ and runs redeploys.
 SIGNAL_TO_HOST_DIR = os.environ.get(
     "SIGNAL_TO_HOST_DIR",
     "/signal-to-host"

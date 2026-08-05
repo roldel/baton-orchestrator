@@ -1,11 +1,13 @@
 #!/bin/sh
-# Detects the docker compose file inside a directory.
-# Supports multiple naming conventions:
-#   docker-compose.yml / docker-compose.yaml
-#   compose.yml / compose.yaml
+# Backward-compatible wrapper around resolve-compose-files.sh.
 #
-# Prints the absolute file path to stdout if found.
-# Exits with error if none found.
+# Historical behaviour: print a single compose file path.
+# If multiple files are configured (DOCKER_COMPOSE_FILES), prints the *first*
+# file only and warns on stderr. Prefer resolve-compose-files.sh or
+# compose-cmd.sh for multi-file stacks.
+#
+# Usage:
+#   detect-compose-file.sh <project-dir>
 
 set -eu
 
@@ -14,41 +16,35 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-LOOKUP_PATH="$1"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+RESOLVE="$SCRIPT_DIR/resolve-compose-files.sh"
 
-if [ ! -d "$LOOKUP_PATH" ]; then
-  echo "[detect-compose] ERROR: Directory not found: $LOOKUP_PATH" >&2
+if [ ! -f "$RESOLVE" ]; then
+  echo "[detect-compose] ERROR: resolve-compose-files helper not found: $RESOLVE" >&2
   exit 1
 fi
 
-# Normalize to an absolute path (prevents "./" issues)
-PROJECT_DIR="$(cd "$LOOKUP_PATH" && pwd)"
-
-# List of allowed compose filenames (priority order)
-CANDIDATES="
-docker-compose.yml
-docker-compose.yaml
-compose.yml
-compose.yaml
-"
-
-FOUND=""
-
-for name in $CANDIDATES; do
-  if [ -f "$PROJECT_DIR/$name" ]; then
-    FOUND="$PROJECT_DIR/$name"
-    break
+FILE_LIST="$(sh "$RESOLVE" "$1")"
+FIRST=""
+COUNT=0
+while IFS= read -r f || [ -n "$f" ]; do
+  [ -n "$f" ] || continue
+  COUNT=$((COUNT + 1))
+  if [ -z "$FIRST" ]; then
+    FIRST="$f"
   fi
-done
+done <<EOF
+$FILE_LIST
+EOF
 
-if [ -z "$FOUND" ]; then
-  echo "[detect-compose] ERROR: No docker compose file found in $PROJECT_DIR" >&2
-  echo "[detect-compose] Tried:" >&2
-  for name in $CANDIDATES; do
-    echo "  - $name" >&2
-  done
+if [ -z "$FIRST" ]; then
+  echo "[detect-compose] ERROR: No docker compose file resolved" >&2
   exit 1
 fi
 
-# Print only the file path (stdout). Everything else goes to stderr.
-echo "$FOUND"
+if [ "$COUNT" -gt 1 ]; then
+  echo "[detect-compose] WARNING: $COUNT compose files configured; only reporting the first." >&2
+  echo "[detect-compose]          Use resolve-compose-files.sh / compose-cmd.sh for full multi-file support." >&2
+fi
+
+echo "$FIRST"

@@ -179,19 +179,15 @@ fi
 
 # --- Docker Compose ---
 if [ "${DOCKER_COMPOSE_RESTART_REQUIRED:-NO}" = "YES" ]; then
-    # Use the shared detector (supports docker-compose.yml/.yaml and
-    # compose.yml/.yaml) instead of hardcoding docker-compose.yml, so this
-    # matches what deploy.sh/restart-containers.sh accept for the same project.
-    COMPOSE="$(sh "$BASE_DIR/scripts/tools/helpers/detect-compose-file.sh" "$REPO_LOCATION" 2>>"$LOG")" || COMPOSE=""
-    if [ -n "$COMPOSE" ]; then
-        COMPOSE_DIR="$(dirname "$COMPOSE")"
-        # Run from the compose file's directory so `docker compose` picks up
-        # the project's .env for ${VAR} interpolation inside the compose file
-        # (e.g. volume paths keyed on DOMAIN_NAME) — same reasoning as
-        # restart-containers.sh's cd before invoking compose.
+    # Resolve compose file(s) the same way as deploy/restart-containers
+    # (auto-detect or DOCKER_COMPOSE_FILES from the project's .env). After
+    # git pull the tree may have updated the compose layout — re-resolve now.
+    COMPOSE_CMD="$BASE_DIR/scripts/tools/helpers/compose-cmd.sh"
+    RESOLVE_HELPER="$BASE_DIR/scripts/tools/helpers/resolve-compose-files.sh"
+    if sh "$RESOLVE_HELPER" "$REPO_LOCATION" >>"$LOG" 2>&1; then
         log "Restarting Docker Compose (down and up)"
-        ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE" down ) >>"$LOG" 2>&1
-        if ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE" up -d --build --force-recreate ) >>"$LOG" 2>&1; then
+        sh "$COMPOSE_CMD" "$REPO_LOCATION" down >>"$LOG" 2>&1 || true
+        if sh "$COMPOSE_CMD" "$REPO_LOCATION" up -d --build --force-recreate >>"$LOG" 2>&1; then
             log "Docker Compose UP OK"
         else
             # `down` already stopped the old containers, so restoring only the
@@ -200,7 +196,7 @@ if [ "${DOCKER_COMPOSE_RESTART_REQUIRED:-NO}" = "YES" ]; then
             # serving.
             log "Docker Compose UP FAILED → restoring previous version and bringing it back up"
             restore_backup
-            if ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE" up -d --build --force-recreate ) >>"$LOG" 2>&1; then
+            if sh "$COMPOSE_CMD" "$REPO_LOCATION" up -d --build --force-recreate >>"$LOG" 2>&1; then
                 log "Previous version restored and running"
             else
                 log "WARNING: could not bring previous version back up — site may be DOWN, manual intervention required"
@@ -209,7 +205,7 @@ if [ "${DOCKER_COMPOSE_RESTART_REQUIRED:-NO}" = "YES" ]; then
             exit 1
         fi
     else
-        log "WARNING: DOCKER_COMPOSE_RESTART_REQUIRED=YES but no compose file found under '$REPO_LOCATION'."
+        log "WARNING: DOCKER_COMPOSE_RESTART_REQUIRED=YES but no compose file(s) found under '$REPO_LOCATION'."
     fi
 fi
 

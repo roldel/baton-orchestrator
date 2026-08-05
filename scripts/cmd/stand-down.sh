@@ -19,7 +19,8 @@ BASE_DIR="/opt/baton-orchestrator"
 PROJECT_DIR="/srv/projects/$PROJECT"
 TOOLS_DIR="$BASE_DIR/scripts/tools"
 
-COMPOSE_HELPER="$TOOLS_DIR/helpers/detect-compose-file.sh"
+COMPOSE_CMD="$TOOLS_DIR/helpers/compose-cmd.sh"
+RESOLVE_HELPER="$TOOLS_DIR/helpers/resolve-compose-files.sh"
 NGINX_TEST="$TOOLS_DIR/nginx/test-config.sh"
 NGINX_RELOAD="$TOOLS_DIR/nginx/reload.sh"
 
@@ -54,19 +55,22 @@ STATIC_SITE="${STATIC_SITE:-no}"
 if [ "$STATIC_SITE" = "yes" ]; then
   echo "[stand-down] Static site — no containers to stop"
 else
-  if [ ! -x "$COMPOSE_HELPER" ]; then
-    echo "[stand-down] ERROR: detect-compose-file helper not found or not executable: $COMPOSE_HELPER" >&2
+  if [ ! -f "$COMPOSE_CMD" ]; then
+    echo "[stand-down] ERROR: compose-cmd helper not found: $COMPOSE_CMD" >&2
     exit 1
   fi
 
-  COMPOSE_FILE="$(sh "$COMPOSE_HELPER" "$PROJECT_DIR")"
-  COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
+  if [ -f "$RESOLVE_HELPER" ]; then
+    COMPOSE_FILES="$(sh "$RESOLVE_HELPER" "$PROJECT_DIR")"
+    echo "[stand-down] Using compose file(s):"
+    printf '%s\n' "$COMPOSE_FILES" | while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      echo "[stand-down]   - $f"
+    done
+  fi
 
-  echo "[stand-down] Using compose file: $COMPOSE_FILE"
-
-  cd "$COMPOSE_DIR"
   echo "[stand-down] docker compose down"
-  docker compose -f "$COMPOSE_FILE" down || {
+  sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
     echo "[stand-down] WARNING: docker compose down failed (containers may already be stopped)." >&2
   }
 fi

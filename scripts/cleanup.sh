@@ -101,6 +101,10 @@ rm -rf \
 # Old/alternate webhook host dirs (these do not overlap /srv/projects)
 rm -rf \
   /srv/baton-orchestrator \
+  /srv/webhooks/queue \
+  /srv/webhooks/processing \
+  /srv/webhooks/processed \
+  /srv/webhooks/failed \
   /srv/webhooks/signals \
   /srv/webhooks/projects 2>/dev/null || true
 

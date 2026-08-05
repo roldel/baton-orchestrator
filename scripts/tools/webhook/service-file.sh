@@ -1,9 +1,9 @@
 #!/sbin/openrc-run
 # /etc/init.d/baton-webhook
-# Baton Webhook Watcher Service
+# Baton Webhook Queue Worker
 
 name="Baton Webhook Watcher"
-description="Monitors /srv/webhooks/signals/ for task_*.baton and triggers redeploys"
+description="Drains /srv/webhooks/queue for task_*.baton and triggers redeploys"
 
 LOG_FILE="/var/log/baton-webhook.log"
 
@@ -26,6 +26,9 @@ depend() {
 
 start_pre() {
     # ensure dirs/files exist with sane perms
-    checkpath --directory --mode 0755 /srv/webhooks/signals
+    checkpath --directory --mode 0755 /srv/webhooks/queue
+    checkpath --directory --mode 0755 /srv/webhooks/processing
+    checkpath --directory --mode 0755 /srv/webhooks/processed
+    checkpath --directory --mode 0755 /srv/webhooks/failed
     checkpath --file --mode 0644 /var/log/baton-webhook.log
 }

@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import datetime
 import tempfile
+import uuid
 
 from flask import abort
 from dotenv import dotenv_values
@@ -86,9 +87,21 @@ def should_restart_docker(commits, trigger_token):
 def create_task_file(project, env, signal_dir, restart_required):
     """
     Atomically creates a task_*.baton file with shell-sourceable key=value lines.
+
+    Filename is unique under burst load:
+      task_<YYYYMMDD-HHMMSS>_<pid>_<uuid8>_<project>.baton
+    The leading timestamp keeps lexicographic order ≈ enqueue order for the
+    host worker; pid + uuid avoid same-second collisions.
     """
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    task_filename = f"task_{timestamp}_{project}.baton"
+    # Sanitize project for use in a filename (keep it readable; PROJECT= inside
+    # the file is the source of truth for the real name).
+    safe_project = "".join(
+        c if (c.isalnum() or c in "-_.") else "_" for c in project
+    ) or "project"
+    task_filename = (
+        f"task_{timestamp}_{os.getpid()}_{uuid.uuid4().hex[:8]}_{safe_project}.baton"
+    )
 
     # Create temp file in the same dir to allow atomic rename
     with tempfile.NamedTemporaryFile(

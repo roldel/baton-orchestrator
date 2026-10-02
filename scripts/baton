@@ -13,6 +13,8 @@
 #   baton respawn <project>
 #   baton rebuild-all
 #   baton rebuild-all --mode dynamic --dry-run
+#   baton rebuild-all --activate-webhooks
+#   baton rebuild-all --activate-webhooks --dry-run
 #   baton status
 #   baton status <project>
 #   baton remove-project <project>
@@ -39,6 +41,7 @@ Project commands:
   stand-down <project>                   Disable a project (keeps SSL)
   respawn <project>                      Full stop → rebuild → redeploy
   rebuild-all [--mode dynamic|static]    Respawn all projects
+               [--activate-webhooks]
                [--dry-run]
   status [project]                       Show status of all (or one) project(s)
   remove-project <project>               Remove a project from Baton

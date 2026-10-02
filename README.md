@@ -444,7 +444,7 @@ Both paths — dynamic and static — support **push-to-deploy**. Activate it pe
 | `./scripts/cmd/stand-down.sh <project>` | Disable project (keeps SSL) |
 | `./scripts/cmd/respawn.sh <project>` | Full reset: stand down, redeploy, restore webhook if it was active |
 | `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs the webhook route on each project whose `.env` already sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose snippet is already installed or whose webhook settings are incomplete |
-| `./scripts/cmd/status.sh [project]` | Overview of all projects (mode, site, containers, webhook), or a single project |
+| `./scripts/cmd/status.sh [project]` | Overview of all projects (host, mode, site, containers, webhook), or a single project. Host is `DOMAIN_NAME` |
 | `./scripts/cmd/remove-project.sh <project> [--delete-files]` | Remove a project from Baton management; keeps SSL cert and shared files unless `--delete-files` is passed |
 | `./scripts/cmd/webhook-activate.sh <project>` | Add and connect webhook endpoint and redeploy scripts |
 | `./scripts/cmd/webhook-deactivate.sh <project>` | Remove webhook endpoint, disable auto redeploy |

@@ -3,6 +3,7 @@
 # Overview of all Baton-managed projects under /srv/projects.
 #
 # For each project, reports:
+#   - Host         (DOMAIN_NAME; aliases stay in the project .env)
 #   - Mode         (dynamic / static)
 #   - Site live    (SSL cert present + nginx config installed)
 #   - Containers   (dynamic only: running / stopped / absent)
@@ -55,9 +56,10 @@ else
 fi
 
 # --- Header ---
-printf "\n${BOLD}%-20s %-10s %-12s %-14s %-12s${RESET}\n" \
-    "PROJECT" "MODE" "SITE" "CONTAINERS" "WEBHOOK"
-printf '%0.s─' $(seq 1 72); printf '\n'
+# Width: 20+1+32+1+10+1+12+1+14+1+12 = 105
+printf "\n${BOLD}%-20s %-32s %-10s %-12s %-14s %-12s${RESET}\n" \
+    "PROJECT" "HOST" "MODE" "SITE" "CONTAINERS" "WEBHOOK"
+printf '%0.s─' $(seq 1 105); printf '\n'
 
 # --- Per-project loop ---
 for PROJECT in $PROJECTS; do
@@ -75,6 +77,15 @@ for PROJECT in $PROJECTS; do
         . "$ENV_FILE"
         STATIC_SITE="${STATIC_SITE:-no}"
         DOMAIN_NAME="${DOMAIN_NAME:-}"
+    fi
+
+    # --- HOST column ---
+    # Plain text, padded here. The colour helpers pad to 12 columns and would
+    # clip a hostname. A name longer than 32 is printed in full.
+    if [ -n "$DOMAIN_NAME" ]; then
+        HOST_COL="$(printf '%-32s' "$DOMAIN_NAME")"
+    else
+        HOST_COL="$(printf '%b%-26s' "${YELLOW}(none)${RESET}" '')"
     fi
 
     # --- MODE column ---
@@ -137,12 +148,13 @@ for PROJECT in $PROJECTS; do
     fi
 
     # --- Print row ---
-    printf "%-20s %b %-2s %b %-2s %b %-2s %b\n" \
+    printf "%-20s %s %b %-2s %b %-2s %b %-2s %b\n" \
         "$PROJECT" \
+        "$HOST_COL" \
         "$MODE_COL" "" \
         "$SITE_COL" "" \
         "$CONTAINERS_COL" "" \
         "$WEBHOOK_COL"
 done
 
-printf '%0.s─' $(seq 1 72); printf '\n\n'
+printf '%0.s─' $(seq 1 105); printf '\n\n'

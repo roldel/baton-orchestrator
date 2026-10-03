@@ -154,23 +154,28 @@ if [ -n "${CI_PIPELINE_LOCATION:-}" ]; then
     fi
 fi
 
-# --- Static site sync ---
-# Read STATIC_SITE from the project's own .env, in an isolated subshell so it
-# can't clobber already-loaded task-file vars (e.g. REPO_LOCATION, which some
-# projects' .env also defines).
+# --- Static file publish ---
+# Read STATIC_SITE and STATIC_SOURCE_DIR from the project's own .env, in an
+# isolated subshell so it can't clobber already-loaded task-file vars (e.g.
+# REPO_LOCATION, which some projects' .env also defines).
+# A static project always publishes. A dynamic project publishes only when
+# STATIC_SOURCE_DIR is set, and still restarts Compose below. CI, when set,
+# has already run, so a build script can fill that directory first.
 PROJECT_ENV="/srv/projects/${PROJECT:-}/.env"
+# Clear first so a value already loaded from the task file cannot leak in.
+STATIC_SITE=""
+STATIC_SOURCE_DIR=""
 if [ -n "${PROJECT:-}" ] && [ -f "$PROJECT_ENV" ]; then
-    STATIC_SITE="$( . "$PROJECT_ENV" >/dev/null 2>&1; echo "${STATIC_SITE:-no}" )"
-else
-    STATIC_SITE="no"
+    STATIC_SITE="$( . "$PROJECT_ENV" >/dev/null 2>&1; printf '%s' "${STATIC_SITE:-no}" )"
+    STATIC_SOURCE_DIR="$( . "$PROJECT_ENV" >/dev/null 2>&1; printf '%s' "${STATIC_SOURCE_DIR:-}" )"
 fi
 
-if [ "$STATIC_SITE" = "yes" ]; then
-    log "Static site sync: $PROJECT"
+if [ "$STATIC_SITE" = "yes" ] || [ -n "$STATIC_SOURCE_DIR" ]; then
+    log "Publishing static files: $PROJECT"
     if sh "$BASE_DIR/scripts/tools/static/sync-static-site.sh" "$PROJECT" >>"$LOG" 2>&1; then
-        log "Static sync OK"
+        log "Static publish OK"
     else
-        log "Static sync FAILED → restoring"
+        log "Static publish FAILED → restoring"
         restore_backup
         mv "$TASK_FILE" "$PROCESSED_DIR/$(basename "$TASK_FILE").failed.$(date +%s)" 2>/dev/null || true
         exit 1

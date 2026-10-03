@@ -1,8 +1,10 @@
 #!/bin/sh
-# Sync a static site's built output into the shared-files location nginx
-# serves from. Simple wholesale copy (no rsync/delta-checking): copies into a
-# sibling temp directory, then atomically renames it into place, so nginx
-# never serves an empty or half-copied directory if the copy is interrupted.
+# Sync a project's built output into the shared-files location nginx serves
+# from. Used for static sites, and for dynamic projects that also set
+# STATIC_SOURCE_DIR (containers still run; server.conf serves this tree).
+# Simple wholesale copy (no rsync/delta-checking): copies into a sibling temp
+# directory, then atomically renames it into place, so nginx never serves an
+# empty or half-copied directory if the copy is interrupted.
 #
 # Source:      /srv/projects/<project>/<STATIC_SOURCE_DIR>
 # Destination: /srv/shared-files/<SITE_KEY>/site

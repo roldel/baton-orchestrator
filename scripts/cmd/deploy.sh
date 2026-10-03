@@ -64,12 +64,25 @@ sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" $REQUIRED_ENV_VARS
 RENDERED_FILE="$(sh "$TOOLS_DIR/projects/render-server-conf.sh" "$PROJECT")"
 echo "[deploy] Rendered server config at: $RENDERED_FILE"
 
-# 5) Deploy the site's actual content: sync built static files, or restart
-# the project's containers (down → up -d, clean state + apply .env)
-if [ "$STATIC_SITE" = "yes" ]; then
+# 5) Deploy the site's actual content.
+# Static: publish STATIC_SOURCE_DIR and do not start containers.
+# Dynamic: start containers. If STATIC_SOURCE_DIR is also set, publish that
+# directory first (same release-symlink copy as a static site) so server.conf
+# can serve it from /srv/shared-files/<domain>/site. Sync runs before the
+# container restart: a missing build fails without taking the app down.
+# Read the variable in a subshell so this .env cannot clobber the script.
+STATIC_SOURCE_DIR="$(
+  # shellcheck source=/dev/null
+  . "$PROJECT_DIR/.env" >/dev/null 2>&1
+  printf '%s' "${STATIC_SOURCE_DIR:-}"
+)"
+
+if [ "$STATIC_SITE" = "yes" ] || [ -n "$STATIC_SOURCE_DIR" ]; then
   SYNCED_DIR="$(sh "$TOOLS_DIR/static/sync-static-site.sh" "$PROJECT")"
-  echo "[deploy] Synced static site to: $SYNCED_DIR"
-else
+  echo "[deploy] Synced static files to: $SYNCED_DIR"
+fi
+
+if [ "$STATIC_SITE" != "yes" ]; then
   sh "$TOOLS_DIR/projects/restart-containers.sh" "$PROJECT"
 fi
 

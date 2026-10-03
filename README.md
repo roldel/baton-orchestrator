@@ -154,6 +154,13 @@ DOCKER_NETWORK_SERVICE_ALIAS=myapp
 # Optional
 DOMAIN_ALIASES=www.example.com,api.example.com
 
+# Also publish a pre-built frontend (Svelte, React, …) next to the containers.
+# Relative to the project root. Same publisher as a static site: the files land
+# at /srv/shared-files/<DOMAIN_NAME>/site, which server.conf can serve.
+# Leave unset for an API-only app. The directory must already exist at deploy
+# time (commit the build, or build it on the VPS before the first deploy).
+# STATIC_SOURCE_DIR=frontend/build
+
 
 ## WEBHOOK (optional push-to-deploy — see "Webhook auto-deploy" below)
 
@@ -285,6 +292,27 @@ networks:
     external: true
 ```
 
+### Frontend build on a dynamic project
+
+Set `STATIC_SOURCE_DIR` (for example `frontend/build`) to publish that directory on every deploy and every webhook refresh. The containers still start. Nginx does not read the git checkout. It reads the published copy at `/srv/shared-files/<DOMAIN_NAME>/site`. Point `server.conf` at it and keep proxying the API:
+
+```nginx
+location /api/ {
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass http://${DOCKER_NETWORK_SERVICE_ALIAS}:${APP_PORT};
+}
+
+location / {
+    root /srv/shared-files/${SITE_KEY}/site;
+    try_files $uri $uri/ /index.html;
+}
+```
+
+More specific paths (`/api/`, `/admin/`) belong above the frontend fallback, or the fallback returns `index.html` for them. Compose may live in a subdirectory: `DOCKER_COMPOSE_FILES=backend/docker-compose.yml`. `baton deploy` does not run `CI_PIPELINE_LOCATION`. A webhook refresh does, before this publish, when that variable is set.
+
 ---
 
 ## Deploying a static site
@@ -293,7 +321,7 @@ A pre-built static site (blog, docs, marketing page — plain HTML/CSS/JS, no ba
 
 **Checklist:**
 - [ ] Point the domain (or subdomain) at your VPS IP — see [Scaling with subdomains](#scaling-with-subdomains-one-domain-many-projects) for the one-wildcard-record setup
-- [ ] Add `.env` and `server.conf` to `/srv/projects/<project-name>/` (build your site into `STATIC_SOURCE_DIR` first, or let `CI_PIPELINE_LOCATION` build it on deploy)
+- [ ] Add `.env` and `server.conf` to `/srv/projects/<project-name>/` (build your site into `STATIC_SOURCE_DIR` first; a webhook refresh can run `CI_PIPELINE_LOCATION` before the publish)
 - [ ] `./scripts/cmd/deploy.sh <project-name>`
 
 `.env`:
@@ -421,13 +449,13 @@ Each subdomain project gets its **own** everything: a TLS cert (issued per subdo
 
 ### Static sync mechanics
 
-*(Static sites)* On every `deploy.sh` (and, if webhook is active, every auto-deploy via `handle-webhook.sh`), `scripts/tools/static/sync-static-site.sh` publishes `STATIC_SOURCE_DIR` under `/srv/shared-files/<SITE_KEY>/site` — the path your `server.conf`'s `root` points at. It uses a **release-symlink model**: each sync copies the build into a fresh, fully-formed release directory (`/srv/shared-files/<SITE_KEY>/releases/release-<timestamp>`), and only once that copy is complete does it repoint the `site` symlink at the new release. nginx therefore always follows `site` to a whole tree — never an empty or half-copied one — and the swap is a single symlink flip rather than a partially-populated directory. The newest few releases are kept and older ones pruned. It's a **wholesale replace, not rsync/diff**: each release is the full build output, so files deleted from your build disappear from the live site too — there's no merging.
+On every `deploy.sh` (and, if webhook is active, every auto-deploy via `handle-webhook.sh`), `scripts/tools/static/sync-static-site.sh` publishes `STATIC_SOURCE_DIR` under `/srv/shared-files/<SITE_KEY>/site` — the path your `server.conf`'s `root` points at. Static projects always do this. A dynamic project does it only when `STATIC_SOURCE_DIR` is set, and still starts its containers. It uses a **release-symlink model**: each sync copies the build into a fresh, fully-formed release directory (`/srv/shared-files/<SITE_KEY>/releases/release-<timestamp>`), and only once that copy is complete does it repoint the `site` symlink at the new release. nginx therefore always follows `site` to a whole tree — never an empty or half-copied one — and the swap is a single symlink flip rather than a partially-populated directory. The newest few releases are kept and older ones pruned. It's a **wholesale replace, not rsync/diff**: each release is the full build output, so files deleted from your build disappear from the live site too — there's no merging.
 
 `docker-compose.yml` is not required for static projects — `validate-content.sh` skips that check, and `deploy.sh`/`stand-down.sh` skip the container restart/stop steps entirely.
 
 ### Webhook auto-deploy
 
-Both paths — dynamic and static — support **push-to-deploy**. Activate it per project with `webhook-activate.sh <project>` once the site is live; it requires `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE` in the project's `.env`. On a matching push, the webhook worker identifies the project by its `Host` header, verifies the GitHub HMAC signature (`X-Hub-Signature-256`), checks the branch against `TARGET_BRANCH`, and **enqueues** a redeploy task. For static sites, `CI_PIPELINE_LOCATION` (if set) runs before the static sync so the served build is freshly rebuilt. See the `.env` blocks above for the webhook fields.
+Both paths — dynamic and static — support **push-to-deploy**. Activate it per project with `webhook-activate.sh <project>` once the site is live; it requires `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE` in the project's `.env`. On a matching push, the webhook worker identifies the project by its `Host` header, verifies the GitHub HMAC signature (`X-Hub-Signature-256`), checks the branch against `TARGET_BRANCH`, and **enqueues** a redeploy task. `CI_PIPELINE_LOCATION` (if set) runs on a webhook refresh before the static publish, so a build script can fill `STATIC_SOURCE_DIR` first. `baton deploy` does not run that script. See the `.env` blocks above for the webhook fields.
 
 **Queue (no dropped concurrent webhooks):** the Flask webhook container only writes an atomic `task_*.baton` file under `/srv/webhooks/queue/` (unique name: timestamp + pid + short uuid + project). A single host-side worker (`baton-webhook` / `watch-webhook.sh`) claims tasks one at a time (`queue/` → `processing/`), runs `handle-webhook.sh`, and archives results under `processed/` (or `failed/` if a task is left stranded). Waiting uses inotify plus a timed re-scan so a race can never leave work unprocessed. On worker restart, anything left in `processing/` is reclaimed back into the queue; leftover files under the legacy `signals/` path are migrated the same way. If several tasks for the **same project** pile up, the worker **coalesces** them: only the newest is run; older duplicates are archived as `*.coalesced.<ts>` under `processed/`.
 

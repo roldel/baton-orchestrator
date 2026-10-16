@@ -15,13 +15,14 @@
 
 set -eu
 
-BASE_DIR="/opt/baton-orchestrator"
-PROJECTS_ROOT="/srv/projects"
+BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
+PROJECTS_ROOT="${BATON_PROJECTS_ROOT:-/srv/projects}"
 NGINX_CONF_DIR="$BASE_DIR/orchestrator/nginx/conf.d"
 WEBHOOKS_DIR="/srv/baton-orchestrator/webhooks.d"
 CERT_BASE="/etc/letsencrypt/live"
-COMPOSE_CMD="$BASE_DIR/scripts/tools/helpers/compose-cmd.sh"
+COMPOSE_CMD="${BATON_COMPOSE_CMD:-$BASE_DIR/scripts/tools/helpers/compose-cmd.sh}"
 RESOLVE_HELPER="$BASE_DIR/scripts/tools/helpers/resolve-compose-files.sh"
+STATUS_RC=0
 
 # --- Colour / formatting helpers (degrade gracefully if no tty) ---
 if [ -t 1 ]; then
@@ -46,10 +47,7 @@ info() { printf "${CYAN}%-12s${RESET}" "$1"; }
 # and silently mishandled.
 if [ $# -ge 1 ]; then
     PROJECT_ARG="$1"
-    # PROJECT_ARG is interpolated directly into PROJECT_DIR below; reject a
-    # path-like value (e.g. "../../etc") before it can resolve outside
-    # /srv/projects and have this report (misleadingly) describe an
-    # arbitrary host directory.
+    # A project name is one path segment under PROJECTS_ROOT.
     case "$PROJECT_ARG" in
         ''|.|..)
             echo "ERROR: invalid project name: '$PROJECT_ARG'" >&2
@@ -94,12 +92,7 @@ for PROJECT in "$@"; do
     STATIC_SITE="no"
     DOMAIN_NAME=""
 
-    # Read in isolated subshells via load_env_safe, not sourced directly
-    # (see that file's header): RESOLVE_HELPER/COMPOSE_CMD (both derived
-    # from BASE_DIR) are reused below and get `sh`'d, so a project's own
-    # .env sourced directly could redirect those calls to an
-    # attacker-controlled script, on top of being able to execute arbitrary
-    # commands immediately just by being sourced at all.
+    # Read STATIC_SITE in a subshell. DOMAIN_NAME comes from compute-site-key.sh.
     if [ -f "$ENV_FILE" ]; then
         STATIC_SITE="$(
             set +eu
@@ -109,11 +102,6 @@ for PROJECT in "$@"; do
             fi
         )"
         [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
-        # Resolved via compute-site-key.sh, not extracted raw: DOMAIN_NAME
-        # drives CERT_BASE/NGINX_CONF_DIR/WEBHOOKS_DIR existence checks
-        # below — without compute-site-key.sh's validation, a path-
-        # traversal DOMAIN_NAME could make this report misleading status
-        # for a path outside those directories.
         DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT" 2>/dev/null)" || DOMAIN_NAME=""
     fi
 
@@ -171,22 +159,37 @@ $COMPOSE_FILES
 EOF
             set -- "$@" --
 
-            # Use `docker compose ps` against the resolved file list
-            RUNNING="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status running \
-                           --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
-            STOPPED="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status exited --status stopped \
-                           --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
-            TOTAL=$((RUNNING + STOPPED))
-
-            if [ "$TOTAL" -eq 0 ]; then
-                CONTAINERS_COL="$(warn 'absent')"
-            elif [ "$STOPPED" -gt 0 ] && [ "$RUNNING" -eq 0 ]; then
-                CONTAINERS_COL="$(fail "stopped($TOTAL)")"
-            elif [ "$STOPPED" -gt 0 ]; then
-                CONTAINERS_COL="$(warn "${RUNNING}↑ ${STOPPED}↓")"
-            else
-                CONTAINERS_COL="$(ok "${RUNNING} running")"
+            # A failed ps is not an empty project.
+            _st_run=$(mktemp)
+            _st_stop=$(mktemp)
+            _st_ps=0
+            if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status running \
+                    --format '{{.Name}}' >"$_st_run"; then
+                _st_ps=1
             fi
+            if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status exited --status stopped \
+                    --format '{{.Name}}' >"$_st_stop"; then
+                _st_ps=1
+            fi
+            if [ "$_st_ps" -ne 0 ]; then
+                CONTAINERS_COL="$(fail 'error')"
+                STATUS_RC=1
+            else
+                RUNNING="$(wc -l < "$_st_run" | tr -d ' ')"
+                STOPPED="$(wc -l < "$_st_stop" | tr -d ' ')"
+                TOTAL=$((RUNNING + STOPPED))
+
+                if [ "$TOTAL" -eq 0 ]; then
+                    CONTAINERS_COL="$(warn 'absent')"
+                elif [ "$STOPPED" -gt 0 ] && [ "$RUNNING" -eq 0 ]; then
+                    CONTAINERS_COL="$(fail "stopped($TOTAL)")"
+                elif [ "$STOPPED" -gt 0 ]; then
+                    CONTAINERS_COL="$(warn "${RUNNING}↑ ${STOPPED}↓")"
+                else
+                    CONTAINERS_COL="$(ok "${RUNNING} running")"
+                fi
+            fi
+            rm -f "$_st_run" "$_st_stop"
         fi
     fi
 
@@ -209,3 +212,4 @@ EOF
 done
 
 printf '%0.s─' $(seq 1 105); printf '\n\n'
+exit "$STATUS_RC"

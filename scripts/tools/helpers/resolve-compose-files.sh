@@ -20,7 +20,7 @@
 
 set -eu
 
-BASE_DIR="/opt/baton-orchestrator"
+BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
 
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <project-dir> [compose-file ...]" >&2
@@ -64,13 +64,17 @@ else
   ENV_FILE="$PROJECT_DIR/.env"
   COMPOSE_LIST=""
   if [ -f "$ENV_FILE" ]; then
+    # A parse error is not "unset". Falling through to auto-detect would
+    # deploy a different compose file than the one the project named.
     COMPOSE_LIST="$(
-      set +eu
+      set +u
       . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-      if load_env_safe "$ENV_FILE"; then
-        printf '%s' "${DOCKER_COMPOSE_FILES:-}"
-      fi
-    )"
+      load_env_safe "$ENV_FILE" || exit 2
+      printf '%s' "${DOCKER_COMPOSE_FILES:-}"
+    )" || {
+      echo "[resolve-compose] ERROR: failed to parse $ENV_FILE" >&2
+      exit 1
+    }
   fi
 
   if [ -n "$COMPOSE_LIST" ]; then

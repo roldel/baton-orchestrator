@@ -30,12 +30,7 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Read in an isolated subshell, not sourced into this shell directly: a
-# malformed .env would otherwise abort under set -eu, and a project .env
-# that happens to define BASE_DIR (or any other variable this script itself
-# relies on, e.g. for the compute-site-key.sh call below) would silently
-# clobber it, letting a project's .env redirect which script gets executed
-# with the orchestrator's privileges.
+# Read STATIC_SOURCE_DIR in a subshell so the project file cannot replace BASE_DIR.
 STATIC_SOURCE_DIR="$(
   set +eu
   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
@@ -55,10 +50,7 @@ if [ ! -d "$SOURCE" ]; then
   exit 1
 fi
 
-# Resolve symlinks/".." and confirm the result is still inside PROJECT_DIR.
-# STATIC_SOURCE_DIR comes from the project's own .env; without this check a
-# value like "../../../../etc" would publish files from outside the
-# project's own directory to the public internet via nginx.
+# The source must resolve inside the project directory.
 RESOLVED_SOURCE="$(cd "$SOURCE" && pwd -P)"
 RESOLVED_PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
 case "$RESOLVED_SOURCE" in
@@ -86,14 +78,19 @@ mkdir -p "$RELEASES_DIR"
 # fully-copied tree — never a half-written one. Unique per-run names (timestamp
 # + PID) avoid collisions between two syncs in the same second.
 TS="$(date '+%Y%m%d-%H%M%S')"
-STAGING="$RELEASES_DIR/.staging-$TS-$$"
-NEW_RELEASE="$RELEASES_DIR/release-$TS-$$"
+_sync_pid=$(printf '%05d' $$)
+STAGING="$RELEASES_DIR/.staging-$TS-$_sync_pid"
+NEW_RELEASE="$RELEASES_DIR/release-$TS-$_sync_pid"
 
-# Build the release under a hidden staging name first; if the copy dies partway,
-# the half-tree is a dotfile that is never linked and gets cleaned next run.
+# Build the release under a hidden staging name first. A symlink that points
+# outside this tree is left in place and not published.
 rm -rf "$STAGING" "$NEW_RELEASE"
 mkdir -p "$STAGING"
 cp -a "$SOURCE/." "$STAGING/"
+. "$BASE_DIR/scripts/tools/static/publish-lib.sh"
+if ! baton_reject_escaping_symlinks "$STAGING"; then
+  exit 1
+fi
 mv "$STAGING" "$NEW_RELEASE"      # rename within the same dir → release appears complete
 
 # Legacy migration: earlier versions made `site` a real directory. A symlink
@@ -104,10 +101,8 @@ if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
   rm -rf "$DEST"
 fi
 
-# Repoint `site` at the new release. `ln -sfn` swaps the symlink in place; the
-# window is a bare unlink+symlink (no data movement), and the target is always a
-# fully-built tree.
-ln -sfn "$NEW_RELEASE" "$DEST"
+# Rename a new symlink onto `site`. The target is a fully-built tree.
+baton_atomic_symlink "$NEW_RELEASE" "$DEST"
 
 # Prune old releases, keeping the newest 3. Never remove the live target.
 # Sort by NAME (release-<timestamp>-<pid>), not mtime: the timestamp prefix
@@ -123,8 +118,8 @@ ls -1d "$RELEASES_DIR"/release-* 2>/dev/null | sort -r | tail -n +4 | while IFS=
   [ "$old" = "$CURRENT" ] && continue
   rm -rf "$old" 2>/dev/null || echo "[sync-static-site] WARNING: could not prune old release: $old" >&2
 done || true
-# Sweep any stale staging dirs from interrupted runs.
-rm -rf "$RELEASES_DIR"/.staging-* 2>/dev/null || true
+# Drop staging dirs older than a day. Never remove the path `site` points at.
+baton_sweep_staging "$RELEASES_DIR" "$CURRENT"
 
 echo "[sync-static-site] Sync complete: $DEST → $NEW_RELEASE" >&2
 

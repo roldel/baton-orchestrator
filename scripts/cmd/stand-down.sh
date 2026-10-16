@@ -1,10 +1,9 @@
 #!/bin/sh
 # Stand down a project:
-# - Validate project exists
+# - Cancel queued webhook tasks, or stop if one is already running
 # - Stop its containers
 # - Remove its nginx server config
-# - Test nginx config
-# - Reload nginx
+# - Test nginx config and reload, restoring the vhost if that fails
 
 set -eu
 
@@ -15,14 +14,17 @@ fi
 
 PROJECT="$1"
 
-BASE_DIR="/opt/baton-orchestrator"
-PROJECT_DIR="/srv/projects/$PROJECT"
+BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
+PROJECTS_ROOT="${BATON_PROJECTS_ROOT:-/srv/projects}"
+PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
 TOOLS_DIR="$BASE_DIR/scripts/tools"
 
-COMPOSE_CMD="$TOOLS_DIR/helpers/compose-cmd.sh"
+COMPOSE_CMD="${BATON_COMPOSE_CMD:-$TOOLS_DIR/helpers/compose-cmd.sh}"
 RESOLVE_HELPER="$TOOLS_DIR/helpers/resolve-compose-files.sh"
-NGINX_TEST="$TOOLS_DIR/nginx/test-config.sh"
-NGINX_RELOAD="$TOOLS_DIR/nginx/reload.sh"
+NGINX_TEST="${BATON_NGINX_TEST:-$TOOLS_DIR/nginx/test-config.sh}"
+NGINX_RELOAD="${BATON_NGINX_RELOAD:-$TOOLS_DIR/nginx/reload.sh}"
+SITE_KEY_HELPER="${BATON_SITE_KEY_HELPER:-$BASE_DIR/scripts/tools/helpers/compute-site-key.sh}"
+QUIESCE="$TOOLS_DIR/webhook/quiesce-project.sh"
 
 ENV_FILE="$PROJECT_DIR/.env"
 NGINX_CONF_DIR="$BASE_DIR/orchestrator/nginx/conf.d"
@@ -31,7 +33,6 @@ BACKUP_DIR="$BASE_DIR/tmp/nginx-backups"
 echo "[stand-down] Standing down project: $PROJECT"
 echo "[stand-down] Project dir: $PROJECT_DIR"
 
-# 1) Validate project directory exists
 sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -39,14 +40,18 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# DOMAIN_NAME drives the nginx conf path remove_site_conf() moves below, so
-# it's resolved via compute-site-key.sh (not extracted raw) to get its
-# path-traversal/character validation — a project's own .env setting
-# DOMAIN_NAME to something like "../../../../etc/some-file" must not let
-# this script move an arbitrary host file via that path. compute-site-key.sh
-# itself loads .env via load_env_safe, never sourced directly, so BASE_DIR/
-# TOOLS_DIR (reused below) can't be clobbered by the .env either.
-DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")" || DOMAIN_NAME=""
+# A queued task can compose up after the containers are stopped. Refuse
+# while one is in processing/, and cancel the ones still queued.
+if ! sh "$QUIESCE" "$PROJECT"; then
+  echo "[stand-down] ERROR: could not quiesce webhook tasks for $PROJECT" >&2
+  exit 1
+fi
+
+if ! DOMAIN_NAME="$(sh "$SITE_KEY_HELPER" "$PROJECT")"; then
+  echo "[stand-down] ERROR: could not resolve SITE_KEY for $PROJECT" >&2
+  exit 1
+fi
+
 STATIC_SITE="$(
   set +eu
   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
@@ -56,21 +61,11 @@ STATIC_SITE="$(
 )"
 [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
 
-# 2) Remove webhook (guarded on DOMAIN_NAME to avoid a spurious "missing
-# DOMAIN_NAME" failure from webhook-deactivate.sh if the .env is incomplete).
-# Tolerated like the `docker compose down` below: a transient failure here
-# (e.g. nginx reload) must not abort stand-down before containers are
-# stopped and the site's own nginx conf is removed — steps 5-6 re-test and
-# reload nginx anyway, which catches any lingering config problem.
-if [ -n "${DOMAIN_NAME:-}" ]; then
-  sh "$BASE_DIR/scripts/cmd/webhook-deactivate.sh" "$PROJECT" || {
-    echo "[stand-down] WARNING: webhook deactivation failed; continuing with stand-down." >&2
-  }
-else
-  echo "[stand-down] No DOMAIN_NAME set — skipping webhook deactivation"
+if ! sh "$BASE_DIR/scripts/cmd/webhook-deactivate.sh" "$PROJECT"; then
+  echo "[stand-down] WARNING: webhook deactivation failed; continuing with stand-down." >&2
 fi
 
-# 3) Stop project containers (static sites have no compose file / container)
+CONTAINERS_STOPPED=0
 if [ "$STATIC_SITE" = "yes" ]; then
   echo "[stand-down] Static site — no containers to stop"
 else
@@ -89,37 +84,73 @@ else
   fi
 
   echo "[stand-down] docker compose down"
-  sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
-    echo "[stand-down] WARNING: docker compose down failed (containers may already be stopped)." >&2
-  }
+  if sh "$COMPOSE_CMD" "$PROJECT_DIR" down; then
+    CONTAINERS_STOPPED=1
+  else
+    _sd_ps=$(mktemp)
+    if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --format '{{.Name}}' > "$_sd_ps"; then
+      rm -f "$_sd_ps"
+      echo "[stand-down] ERROR: docker compose down failed and compose ps failed" >&2
+      exit 1
+    fi
+    if [ -s "$_sd_ps" ]; then
+      rm -f "$_sd_ps"
+      echo "[stand-down] ERROR: docker compose down failed and containers are still running" >&2
+      exit 1
+    fi
+    rm -f "$_sd_ps"
+    echo "[stand-down] docker compose down failed, but nothing is running" >&2
+  fi
 fi
 
-# 4) Remove the nginx server config for this project (keyed by DOMAIN_NAME)
 mkdir -p "$BACKUP_DIR"
+CONF_REMOVED=0
+CONF_FILE="$NGINX_CONF_DIR/${DOMAIN_NAME}.conf"
+CONF_BACKUP=
+if [ -f "$CONF_FILE" ]; then
+  TS="$(date '+%Y%m%d-%H%M%S')"
+  CONF_BACKUP="$BACKUP_DIR/${DOMAIN_NAME}.conf.removed.$TS"
+  echo "[stand-down] Backing up nginx config: $CONF_FILE → $CONF_BACKUP"
+  cp "$CONF_FILE" "$CONF_BACKUP"
+  rm -f "$CONF_FILE"
+  CONF_REMOVED=1
+else
+  echo "[stand-down] No nginx server config found: $CONF_FILE (nothing to remove)"
+fi
 
-remove_site_conf() {
-  SITE_KEY="$1"
-  [ -n "$SITE_KEY" ] || return 0
-  CONF_FILE="$NGINX_CONF_DIR/${SITE_KEY}.conf"
-  if [ -f "$CONF_FILE" ]; then
-    TS="$(date '+%Y%m%d-%H%M%S')"
-    BACKUP_FILE="$BACKUP_DIR/${SITE_KEY}.conf.removed.$TS"
-    echo "[stand-down] Moving nginx config: $CONF_FILE → $BACKUP_FILE"
-    mv "$CONF_FILE" "$BACKUP_FILE"
-  else
-    echo "[stand-down] No nginx server config found: $CONF_FILE (nothing to remove)"
+restore_conf() {
+  if [ "$CONF_REMOVED" -eq 1 ] && [ -n "$CONF_BACKUP" ] && [ -f "$CONF_BACKUP" ]; then
+    if ! cp "$CONF_BACKUP" "$CONF_FILE"; then
+      echo "[stand-down] ERROR: failed to restore $CONF_FILE" >&2
+      exit 1
+    fi
+    echo "[stand-down] Restored nginx config from $CONF_BACKUP" >&2
   fi
 }
 
-remove_site_conf "${DOMAIN_NAME:-}"
+if ! sh "$NGINX_TEST"; then
+  echo "[stand-down] ERROR: nginx test failed after removing the vhost" >&2
+  restore_conf
+  exit 1
+fi
 
-# 5) Test nginx config
-sh "$NGINX_TEST"
-
-# 6) Reload nginx
-sh "$NGINX_RELOAD"
+if ! sh "$NGINX_RELOAD"; then
+  echo "[stand-down] ERROR: nginx reload failed" >&2
+  restore_conf
+  exit 1
+fi
 
 echo "[stand-down] Project '$PROJECT' has been stood down:"
-echo "             - Containers stopped"
-echo "             - Nginx server config removed"
+if [ "$STATIC_SITE" = "yes" ]; then
+  echo "             - No containers (static site)"
+elif [ "$CONTAINERS_STOPPED" -eq 1 ]; then
+  echo "             - Containers stopped"
+else
+  echo "             - No containers were running"
+fi
+if [ "$CONF_REMOVED" -eq 1 ]; then
+  echo "             - Nginx server config removed"
+else
+  echo "             - No nginx server config was installed"
+fi
 echo "             - Nginx reloaded"

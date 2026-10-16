@@ -80,11 +80,11 @@ fi
 
 # --- Step 1: Stand down (deactivates webhook + stops containers + removes nginx config) ---
 echo "[remove] Step 1/3 — Standing down project..."
-if sh "$CMD_DIR/stand-down.sh" "$PROJECT"; then
-    echo "[remove] Stand-down OK."
-else
-    echo "[remove] WARNING: stand-down encountered an issue. Continuing..." >&2
+if ! sh "$CMD_DIR/stand-down.sh" "$PROJECT"; then
+    echo "[remove] ERROR: stand-down failed. Project files were not deleted." >&2
+    exit 1
 fi
+echo "[remove] Stand-down OK."
 
 # --- Step 2: Report what was preserved ---
 echo ""
@@ -92,11 +92,7 @@ echo "[remove] Step 2/3 — Preserved resources (manual cleanup if needed):"
 
 ENV_FILE="$PROJECT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
-    # Resolved via compute-site-key.sh, not extracted raw: DOMAIN_NAME
-    # drives CERT_DIR/SHARED_FILES below — without compute-site-key.sh's
-    # path-traversal/character validation, a crafted DOMAIN_NAME could
-    # make this report (and an operator's follow-up manual cleanup) point
-    # at an arbitrary host path instead of this project's own.
+    # DOMAIN_NAME comes from compute-site-key.sh, so the reported paths stay under the cert and shared-files roots.
     DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT" 2>/dev/null)" || DOMAIN_NAME=""
 
     CERT_DIR="/etc/letsencrypt/live/${DOMAIN_NAME}"

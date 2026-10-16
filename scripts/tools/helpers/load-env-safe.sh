@@ -1,41 +1,11 @@
 #!/bin/sh
-# scripts/tools/helpers/load-env-safe.sh — safely load a project's .env as
-# shell variables, WITHOUT ever executing its content as shell code.
+# Load a project .env as data. A line is KEY=value, KEY="value", or KEY='value'.
+# Reserved names (PATH, IFS, linker, language, and git config) are rejected
+# before assignment. Callers that must keep their own variables snapshot them
+# and restore after the load.
 #
-# `. "$ENV_FILE"` (direct sourcing, used almost everywhere in this codebase
-# until now) parses the *entire file* as a shell script: a value written as
-#   PAYLOAD_SIGNATURE=abc;rm -rf /some/path
-# executes `rm -rf /some/path` the instant that line is sourced — regardless
-# of whether PAYLOAD_SIGNATURE's value is ever subsequently used anywhere
-# dangerous. Every project's .env is effectively attacker-controlled from
-# that project owner's perspective, so this is full arbitrary command
-# execution with the orchestrator's (often root) privileges, reachable from
-# any project's own config.
-#
-# This file defines load_env_safe() instead: it reads a .env line-by-line
-# as pure DATA (never as shell syntax) and assigns each KEY=VALUE pair via
-# `eval "$key=\"\$val\""` — the same technique scripts/tools/webhook/
-# handle-webhook.sh's load_task() already uses safely for task files. The
-# value is substituted *inside double quotes, at eval time*, so characters
-# in it (;, `, $(...), &&, a bare space, ...) are never re-parsed as shell
-# syntax; they're just the string being assigned, no matter what they are.
-#
-# Usage (meant to be sourced — this file itself is trusted/orchestrator-
-# owned, only the .env content it parses is untrusted):
 #   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
 #   load_env_safe "$ENV_FILE"
-#
-# Every loaded KEY becomes an exported shell variable (matching `set -a`
-# semantics), so templating callers (render-server-conf.sh) and subprocess
-# callers see it the same way direct sourcing + `set -a` did.
-#
-# NOTE: this function does NOT protect against a project's .env redefining
-# a variable this script's CALLER relies on afterward (e.g. BASE_DIR,
-# TOOLS_DIR) — that's a separate concern. Callers that only need a handful
-# of specific values should still call this inside an isolated subshell and
-# extract just those values, exactly as before; callers that need "export
-# everything" (render-server-conf.sh) should snapshot and restore their own
-# trusted path variables immediately after calling this.
 #
 # Deliberate limitations (fails closed rather than guessing intent):
 #   - A line must be exactly `KEY=value`, `KEY="value"` or `KEY='value'`.
@@ -93,18 +63,7 @@ load_env_safe() {
     _lesf_key="${_lesf_line%%=*}"
     _lesf_val="${_lesf_line#*=}"
 
-    # Validate the KEY in full. A glob's trailing `*` matches ANY characters
-    # at that position — it is not "more of the preceding bracket class" the
-    # way a regex quantifier would be — so `case "$_lesf_line" in
-    # [A-Z_][A-Z0-9_]*=*)` (the previous check here) only pinned down the
-    # first two characters of the line; everything between there and the
-    # first `=` was unchecked. That let a line like
-    # `AB$(cmd)=x` through, and $_lesf_key is interpolated unescaped into the
-    # `eval` below, so an unchecked key is arbitrary shell injection the
-    # instant that eval runs. Checking the extracted key against a
-    # negated-class glob (`*[!A-Z0-9_]*`, mirroring the technique already
-    # used correctly in compute-site-key.sh / validate-webhook-url.sh) is the
-    # correct way to constrain every character, not just the first two.
+    # Every character of the key must match [A-Z_][A-Z0-9_]*.
     case "$_lesf_key" in
       [A-Z_]*) ;;
       *)
@@ -115,6 +74,16 @@ load_env_safe() {
     case "$_lesf_key" in
       *[!A-Z0-9_]*)
         echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: not a KEY=VALUE line (KEY must be [A-Z_][A-Z0-9_]*): $_lesf_line" >&2
+        return 1
+        ;;
+    esac
+
+    # These names change which binaries run, how words split, or how git and
+    # dynamic linking behave. A project .env must not be able to set them.
+    # Docker Compose reads .env itself, so compose interpolation is unaffected.
+    case "$_lesf_key" in
+      PATH|IFS|CDPATH|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|LD_DEBUG|LD_PROFILE|GLIBC_TUNABLES|PYTHONPATH|PYTHONHOME|PERL5OPT|GIT_DIR|GIT_WORK_TREE|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*)
+        echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: reserved key $_lesf_key cannot be set from a project .env" >&2
         return 1
         ;;
     esac

@@ -25,7 +25,7 @@ case "$PROJECT" in
     ;;
 esac
 
-PROJECT_DIR="/srv/projects/$PROJECT"
+PROJECT_DIR="${BATON_PROJECTS_ROOT:-/srv/projects}/$PROJECT"
 
 echo "Validating project dir: $PROJECT_DIR"
 

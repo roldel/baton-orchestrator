@@ -68,31 +68,21 @@ fi
 
 echo "[webhook-activate] Site is live — proceeding"
 
-# 6. Render server conf file
+# 6. Render outside webhooks.d. A matching snippet is a no-op, so a second
+# deploy --webhook updates or succeeds instead of failing closed.
 TARGET_CONF="$WEBHOOK_DIR/${DOMAIN_NAME}-webhook.conf"
-
-if [ -f "$TARGET_CONF" ]; then
-    echo "[webhook-activate] ERROR: Webhook config already exists: $TARGET_CONF"
-    echo "                    Edit or remove it manually if you want to change it."
-    exit 1
-fi
-
 mkdir -p "$WEBHOOK_DIR"
-
 echo "[webhook-activate] Enabling ${DOMAIN_NAME} → ${WEBHOOK_URL}"
-envsubst '${DOMAIN_NAME} ${WEBHOOK_URL}' < "$TEMPLATE" > "$TARGET_CONF"
-
-# 7. ATOMIC: test config — on failure, remove what we just wrote
-if ! sh "$TOOLS_DIR/nginx/test-config.sh"; then
-    echo "[webhook-activate] ERROR: Nginx configuration test failed after adding webhook!"
-    echo "                    Removing broken config: $TARGET_CONF"
-    rm -f "$TARGET_CONF"
-    echo "[webhook-activate] Activation aborted — no changes applied."
+. "$TOOLS_DIR/webhook/snippet-lib.sh"
+if ! baton_install_webhook_snippet \
+    "$TEMPLATE" \
+    "$TARGET_CONF" \
+    "$TOOLS_DIR/nginx/test-config.sh" \
+    "$TOOLS_DIR/nginx/reload.sh"
+then
+    echo "[webhook-activate] Activation aborted." >&2
     exit 1
 fi
-
-# 8. Only reload if everything is valid
-sh "$TOOLS_DIR/nginx/reload.sh"
 
 echo "[webhook-activate] Webhook successfully activated → $TARGET_CONF"
 echo "[webhook-activate] Done."

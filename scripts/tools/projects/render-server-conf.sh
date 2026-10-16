@@ -45,22 +45,50 @@ command -v envsubst >/dev/null 2>&1 || { echo "[render-server-conf] ERROR: envsu
 
 mkdir -p "$TMP_DIR"
 
-# --- Load .env safely and export everything so envsubst can see them ---
-# load_env_safe (see its header) never executes the file's content as shell
-# code, unlike direct sourcing — a value containing e.g. `;` would otherwise
-# run an arbitrary command the instant this line is sourced. It exports
-# everything it loads, matching the old `set -a` behavior. It loads into
-# THIS shell rather than an isolated subshell, because envsubst further down
-# needs to see whatever arbitrary extra vars a project's server.conf
-# template references — so the trusted path variables above are snapshotted
-# first and restored right after, in case the project's own .env tried to
-# redefine any of them (e.g. BASE_DIR, reused below for compute-site-key.sh).
+# --- Load .env so envsubst can see every template variable ---
+# Load into this shell. Restore the trusted paths immediately after.
 _RSC_BASE_DIR="$BASE_DIR"
 _RSC_PROJECT_DIR="$PROJECT_DIR"
 _RSC_ENV_FILE="$ENV_FILE"
 _RSC_TEMPLATE="$TEMPLATE"
 _RSC_TMP_DIR="$TMP_DIR"
 _RSC_PROJECT="$PROJECT"
+
+# PATH and IFS decide which binaries run and how later loops split words.
+# Linker variables decide which libraries those binaries load. Snapshot the
+# pre-load values (including "unset") and put them back after the load so a
+# project .env cannot replace them. load_env_safe also rejects these names.
+_RSC_PATH_SET=0
+if [ "${PATH+x}" = x ]; then
+  _RSC_PATH_SET=1
+  _RSC_PATH=$PATH
+fi
+_RSC_IFS_SET=0
+if [ "${IFS+x}" = x ]; then
+  _RSC_IFS_SET=1
+  _RSC_IFS=$IFS
+fi
+_RSC_LD_PRELOAD_SET=0
+if [ "${LD_PRELOAD+x}" = x ]; then
+  _RSC_LD_PRELOAD_SET=1
+  _RSC_LD_PRELOAD=$LD_PRELOAD
+fi
+_RSC_LD_LIBRARY_PATH_SET=0
+if [ "${LD_LIBRARY_PATH+x}" = x ]; then
+  _RSC_LD_LIBRARY_PATH_SET=1
+  _RSC_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+fi
+_RSC_LD_AUDIT_SET=0
+if [ "${LD_AUDIT+x}" = x ]; then
+  _RSC_LD_AUDIT_SET=1
+  _RSC_LD_AUDIT=$LD_AUDIT
+fi
+_RSC_LD_DEBUG_SET=0
+if [ "${LD_DEBUG+x}" = x ]; then
+  _RSC_LD_DEBUG_SET=1
+  _RSC_LD_DEBUG=$LD_DEBUG
+fi
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG
 
 . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
 load_env_safe "$ENV_FILE"
@@ -72,27 +100,56 @@ TEMPLATE="$_RSC_TEMPLATE"
 TMP_DIR="$_RSC_TMP_DIR"
 PROJECT="$_RSC_PROJECT"
 export PROJECT
-unset _RSC_BASE_DIR _RSC_PROJECT_DIR _RSC_ENV_FILE _RSC_TEMPLATE _RSC_TMP_DIR _RSC_PROJECT
+if [ "$_RSC_PATH_SET" -eq 1 ]; then
+  PATH="$_RSC_PATH"
+  export PATH
+else
+  unset PATH
+fi
+if [ "$_RSC_IFS_SET" -eq 1 ]; then
+  IFS="$_RSC_IFS"
+else
+  unset IFS
+fi
+if [ "$_RSC_LD_PRELOAD_SET" -eq 1 ]; then
+  LD_PRELOAD="$_RSC_LD_PRELOAD"
+  export LD_PRELOAD
+else
+  unset LD_PRELOAD
+fi
+if [ "$_RSC_LD_LIBRARY_PATH_SET" -eq 1 ]; then
+  LD_LIBRARY_PATH="$_RSC_LD_LIBRARY_PATH"
+  export LD_LIBRARY_PATH
+else
+  unset LD_LIBRARY_PATH
+fi
+if [ "$_RSC_LD_AUDIT_SET" -eq 1 ]; then
+  LD_AUDIT="$_RSC_LD_AUDIT"
+  export LD_AUDIT
+else
+  unset LD_AUDIT
+fi
+if [ "$_RSC_LD_DEBUG_SET" -eq 1 ]; then
+  LD_DEBUG="$_RSC_LD_DEBUG"
+  export LD_DEBUG
+else
+  unset LD_DEBUG
+fi
+unset _RSC_BASE_DIR _RSC_PROJECT_DIR _RSC_ENV_FILE _RSC_TEMPLATE _RSC_TMP_DIR _RSC_PROJECT \
+  _RSC_PATH_SET _RSC_PATH _RSC_IFS_SET _RSC_IFS \
+  _RSC_LD_PRELOAD_SET _RSC_LD_PRELOAD _RSC_LD_LIBRARY_PATH_SET _RSC_LD_LIBRARY_PATH \
+  _RSC_LD_AUDIT_SET _RSC_LD_AUDIT _RSC_LD_DEBUG_SET _RSC_LD_DEBUG
 
 # --- Normalize comma-separated aliases for Nginx (space-separated is standard) ---
-# Ensure DOMAIN_ALIASES is exported after normalization
-DOMAIN_ALIASES="$(echo "${DOMAIN_ALIASES:-}" | tr ',' ' ' | tr -s ' ')"
+# baton_normalize_domain_aliases splits on a fixed IFS and rejects any token
+# that is not a hostname character, so a value that survived the loader cannot
+# change how the words are split or inject an nginx directive.
+. "$BASE_DIR/scripts/tools/helpers/check-domain-aliases.sh"
+if ! DOMAIN_ALIASES="$(baton_normalize_domain_aliases "${DOMAIN_ALIASES:-}")"; then
+  exit 1
+fi
 export DOMAIN_ALIASES
 echo "[render-server-conf] Normalized DOMAIN_ALIASES='${DOMAIN_ALIASES:-}'" >&2
-
-# DOMAIN_ALIASES is substituted unescaped via envsubst into `server_name`
-# below (DOMAIN_NAME itself is validated as SITE_KEY by compute-site-key.sh,
-# called further down, before envsubst runs) — without this check, an alias
-# containing nginx-significant characters could inject directives into the
-# shared orchestrator nginx config.
-for _alias in $DOMAIN_ALIASES; do
-  case "$_alias" in
-    *[!A-Za-z0-9.-]*)
-      echo "[render-server-conf] ERROR: DOMAIN_ALIASES entry '$_alias' contains characters unsafe for an nginx server_name (only letters, digits, '.', '-' are allowed)" >&2
-      exit 1
-      ;;
-  esac
-done
 
 # WEBHOOK_URL is also in VARS_TO_SUBSTITUTE below (a server.conf template may
 # reference it), so it too is substituted unescaped via envsubst — same
@@ -132,6 +189,27 @@ for v in $MANDATORY_VARS; do
 done
 [ "$missing" -eq 0 ] || { echo "[render-server-conf] ❌ Missing mandatory vars. Aborting." >&2; exit 1; }
 
+# These values are written into the shared nginx config by envsubst. Reject
+# anything that is not a port, a DNS label, an email, or a project name.
+. "$BASE_DIR/scripts/tools/helpers/nginx-allowlists.sh"
+if ! baton_check_project_name "$PROJECT"; then
+  echo "[render-server-conf] ERROR: PROJECT '$PROJECT' is not a valid project name" >&2
+  exit 1
+fi
+if ! baton_check_admin_email "${DOMAIN_ADMIN_EMAIL:-}"; then
+  echo "[render-server-conf] ERROR: DOMAIN_ADMIN_EMAIL contains characters outside the allowed set" >&2
+  exit 1
+fi
+if [ "$STATIC_SITE" != "yes" ]; then
+  if ! baton_check_app_port "$APP_PORT"; then
+    echo "[render-server-conf] ERROR: APP_PORT must be an integer from 1 to 65535" >&2
+    exit 1
+  fi
+  if ! baton_check_service_alias "$DOCKER_NETWORK_SERVICE_ALIAS"; then
+    echo "[render-server-conf] ERROR: DOCKER_NETWORK_SERVICE_ALIAS must be a DNS label (letters, digits, '_' or '-', not starting with '-')" >&2
+    exit 1
+  fi
+fi
 
 # --- Define the variables envsubst should process ---
 # This list MUST include every variable placeholder you have in your server.conf template

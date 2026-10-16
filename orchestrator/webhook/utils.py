@@ -10,63 +10,10 @@ import uuid
 import logging
 
 from flask import abort
-from dotenv import dotenv_values
+
+from envfile import HostConflict, find_project_by_host
 
 logger = logging.getLogger(__name__)
-
-
-def find_project_by_host(host, projects_dir):
-    """
-    Scans projects_dir for .env files and matches the Host against
-    DOMAIN_NAME or DOMAIN_ALIASES.
-
-    Returns (project_name, env_dict) or (None, None).
-    """
-    match_name = None
-    match_env = None
-
-    # Sorted (not os.listdir()'s arbitrary order) so that if two projects'
-    # .env ever claim the same host, which one wins is at least stable
-    # across restarts instead of flapping with filesystem enumeration order.
-    for project_name in sorted(os.listdir(projects_dir)):
-        # Construct the full path to the potential project directory
-        project_path = os.path.join(projects_dir, project_name)
-
-        # Ensure it's an actual directory before looking for an .env file
-        if not os.path.isdir(project_path):
-            continue
-
-        env_path = os.path.join(project_path, ".env")
-        if os.path.isfile(env_path):
-            # Load the .env values from the found file
-            env = dotenv_values(env_path)
-
-            domain_name = (env.get("DOMAIN_NAME") or "").lower()
-            if not domain_name:
-                # Skip projects without a defined DOMAIN_NAME
-                continue
-
-            aliases = env.get("DOMAIN_ALIASES") or ""
-            # Normalize aliases: comma or space separated → list
-            alias_list = [d.strip().lower() for d in aliases.replace(",", " ").split() if d.strip()]
-            all_domains = [domain_name] + alias_list
-
-            # Check if the incoming Host header matches any of the domains
-            if host in all_domains:
-                if match_name is None:
-                    match_name, match_env = project_name, env
-                else:
-                    # Keep scanning (sorted order already fixed the winner)
-                    # purely to surface the misconfiguration loudly instead
-                    # of routing silently to whichever project won.
-                    logger.warning(
-                        "Host %r matches multiple projects (%r and %r); "
-                        "routing to %r. Fix DOMAIN_NAME/DOMAIN_ALIASES to "
-                        "remove the overlap.",
-                        host, match_name, project_name, match_name,
-                    )
-
-    return (match_name, match_env) if match_name is not None else (None, None)
 
 
 def verify_signature(secret, body, signature_header):
@@ -110,7 +57,7 @@ def create_task_file(project, env, signal_dir, restart_required):
     The leading timestamp keeps lexicographic order ≈ enqueue order for the
     host worker; pid + uuid avoid same-second collisions.
     """
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     # Sanitize project for use in a filename (keep it readable; PROJECT= inside
     # the file is the source of truth for the real name).
     safe_project = "".join(
@@ -133,14 +80,8 @@ def create_task_file(project, env, signal_dir, restart_required):
     ci_pipeline_location = env.get("CI_PIPELINE_LOCATION") or ""
     custom_redeploy_script_location = env.get("CUSTOM_REDEPLOY_SCRIPT_LOCATION") or ""
 
-    # This task file is sourced line-by-line by handle-webhook.sh, so a value
-    # containing a newline would inject an extra `KEY=VALUE` line — including
-    # a second PROJECT= that would override which project the rest of the
-    # file applies to. These values come from a project's own .env, and
-    # python-dotenv turns a `\n` escape inside a double-quoted value into a
-    # real newline, so this is reachable by any project's own config, not
-    # just a corrupted file. Validate before writing anything, so a rejected
-    # task never leaves a half-written temp file behind.
+    # The task file is read line-by-line. A newline inside a value would
+    # inject another KEY=VALUE line. Reject that before writing.
     for key, value in (
         ("PROJECT", project),
         ("TARGET_BRANCH", target_branch),
@@ -198,7 +139,10 @@ def process_webhook_request(request, projects_root_dir, signal_to_host_dir):
         abort(400, description="Missing Host header")
 
     # Step 2: Find project by domain using the provided projects_root_dir
-    project, env = find_project_by_host(host, projects_root_dir)
+    try:
+        project, env = find_project_by_host(host, projects_root_dir)
+    except HostConflict:
+        abort(409, description="Host matches more than one project")
     if not project:
         abort(403, description="No matching project for this domain")
 

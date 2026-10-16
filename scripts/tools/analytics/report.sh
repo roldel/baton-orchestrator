@@ -88,7 +88,16 @@ echo "[report] Since     : $SINCE"
 echo
 
 # --- Generate report ---
-docker logs --since "$SINCE" "$CONTAINER_NAME" 2>/dev/null | \
+# A failed `docker logs` is not an empty window.
+_report_logs=$(mktemp)
+_report_err=$(mktemp)
+if ! docker logs --since "$SINCE" "$CONTAINER_NAME" >"$_report_logs" 2>"$_report_err"; then
+  cat "$_report_err" >&2
+  rm -f "$_report_logs" "$_report_err"
+  exit 1
+fi
+rm -f "$_report_err"
+_report_awk=0
 awk -v host_filter="$HOST_FILTER" '
   # We expect nginx access log format like:
   #
@@ -222,4 +231,6 @@ awk -v host_filter="$HOST_FILTER" '
       printf "\n"
     }
   }
-'
+' "$_report_logs" || _report_awk=$?
+rm -f "$_report_logs"
+exit "$_report_awk"

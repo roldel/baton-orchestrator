@@ -25,8 +25,10 @@ depend() {
 }
 
 start_pre() {
-    # ensure dirs/files exist with sane perms
-    checkpath --directory --mode 0755 /srv/webhooks/queue
+    # Queue is recreated on every start, then chowned. checkpath --owner
+    # needs a passwd entry the host does not have for uid 65532.
+    checkpath --directory --mode 0700 /srv/webhooks/queue
+    chown 65532:65532 /srv/webhooks/queue
     checkpath --directory --mode 0755 /srv/webhooks/processing
     checkpath --directory --mode 0755 /srv/webhooks/processed
     checkpath --directory --mode 0755 /srv/webhooks/failed

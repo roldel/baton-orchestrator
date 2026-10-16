@@ -15,11 +15,12 @@ fi
 
 PROJECT="$1"
 
-BASE_DIR="/opt/baton-orchestrator"
-PROJECT_DIR="/srv/projects/$PROJECT"
+BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
+PROJECT_DIR="${BATON_PROJECTS_ROOT:-/srv/projects}/$PROJECT"
 ENV_FILE="$PROJECT_DIR/.env"
 ORCHESTRATOR_COMPOSE="$BASE_DIR/orchestrator/docker-compose.yml"
-ENSURE_CERTS="$BASE_DIR/scripts/tools/ssl/ensure-certs.sh"
+ENSURE_CERTS="${BATON_ENSURE_CERTS:-$BASE_DIR/scripts/tools/ssl/ensure-certs.sh}"
+CERT_ROOT="${BATON_CERT_ROOT:-/etc/letsencrypt/live}"
 
 echo "[force-reissue-certs] Forcing certificate re-issue for project: $PROJECT"
 echo "[force-reissue-certs] Project dir: $PROJECT_DIR"
@@ -46,15 +47,7 @@ if [ ! -x "$ENSURE_CERTS" ]; then
 fi
 
 # --- Load env vars ---
-# Read in an isolated subshell, not sourced directly: ORCHESTRATOR_COMPOSE
-# and ENSURE_CERTS are both reused below, and a project's own .env sourced
-# directly could redefine either, redirecting those calls to an
-# attacker-controlled script run with this script's privileges — right
-# after the real certificate lineage has already been deleted via certbot.
-# DOMAIN_NAME itself is resolved via compute-site-key.sh rather than
-# extracted raw: it builds CERT_DIR below and is passed to `certbot delete`,
-# so without compute-site-key.sh's path-traversal/character validation a
-# crafted DOMAIN_NAME could operate on an arbitrary path/cert-name.
+# DOMAIN_NAME comes from compute-site-key.sh so the lineage path stays under the cert root.
 DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 
 if [ -z "${DOMAIN_NAME:-}" ]; then
@@ -64,7 +57,7 @@ fi
 
 echo "[force-reissue-certs] DOMAIN_NAME = $DOMAIN_NAME"
 
-CERT_DIR="/etc/letsencrypt/live/$DOMAIN_NAME"
+CERT_DIR="$CERT_ROOT/$DOMAIN_NAME"
 
 # --- If a lineage exists, delete it cleanly via certbot ---
 if [ -d "$CERT_DIR" ]; then
@@ -75,12 +68,17 @@ if [ -d "$CERT_DIR" ]; then
   docker compose -f "$ORCHESTRATOR_COMPOSE" run --rm certbot delete \
     --cert-name "$DOMAIN_NAME" \
     --non-interactive || {
-      echo "[force-reissue-certs] WARNING: certbot delete failed (see logs above)."
-      echo "[force-reissue-certs] You may need to inspect /etc/letsencrypt manually."
+      echo "[force-reissue-certs] WARNING: certbot delete failed (see logs above)." >&2
+      echo "[force-reissue-certs] You may need to inspect /etc/letsencrypt manually." >&2
     }
 
 else
   echo "[force-reissue-certs] No existing lineage for $DOMAIN_NAME under $CERT_DIR; nothing to delete."
+fi
+
+if [ -f "$CERT_DIR/fullchain.pem" ] || [ -f "$CERT_DIR/privkey.pem" ]; then
+  echo "[force-reissue-certs] ERROR: certificate files still exist in $CERT_DIR after certbot delete" >&2
+  exit 1
 fi
 
 # --- Re-run ensure-certs for this project ---

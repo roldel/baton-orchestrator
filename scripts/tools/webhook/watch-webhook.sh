@@ -81,103 +81,10 @@ EOF
   fi
 }
 
-# Read PROJECT= from a task file (first matching line). Empty if missing.
-task_project() {
-  _tf="$1"
-  _proj=""
-  while IFS= read -r _line || [ -n "$_line" ]; do
-    case "$_line" in
-      PROJECT=*)
-        _proj="${_line#PROJECT=}"
-        # strip optional quotes
-        _proj="${_proj%\"}"; _proj="${_proj#\"}"
-        _proj="${_proj%\'}"; _proj="${_proj#\'}"
-        break
-        ;;
-    esac
-  done < "$_tf"
-  printf '%s' "$_proj"
-}
+# task_project / coalesce_queue live in queue-lib.sh so tests can source
+# them without starting the watcher.
+. "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/queue-lib.sh"
 
-# Collapse multiple pending tasks for the same project into the newest one.
-# Older duplicates are archived under processed/ as .coalesced.<ts> so a push
-# storm does not stack redundant full redeploys. Newest = last in sort order
-# (task filenames are timestamp-prefixed).
-#
-# Implementation: walk tasks in sorted order, overwrite a per-project winner
-# path in a temp dir (last write wins). Then drop any queue file that is not
-# its project's winner.
-coalesce_queue() {
-  _list="$(find "$QUEUE_DIR" -maxdepth 1 -type f -name "$PATTERN" 2>/dev/null | sort)"
-  [ -n "$_list" ] || return 0
-
-  _count=0
-  while IFS= read -r f; do
-    [ -n "$f" ] && [ -f "$f" ] || continue
-    _count=$((_count + 1))
-  done <<EOF
-$_list
-EOF
-  # Nothing to coalesce with fewer than 2 tasks
-  [ "$_count" -ge 2 ] || return 0
-
-  _windir="$(mktemp -d /tmp/baton-coalesce.XXXXXX)" || return 0
-  TAB="$(printf '\t')"
-
-  while IFS= read -r f; do
-    [ -n "$f" ] && [ -f "$f" ] || continue
-    _p="$(task_project "$f")"
-    # A shared literal here would bucket two different unparseable task
-    # files together and let one be silently coalesced away as a "duplicate"
-    # of the other; keying by the file's own (unique) basename instead means
-    # an unparseable task is never mistaken for a different one.
-    [ -n "$_p" ] || _p="__unknown__:$(basename -- "$f")"
-    # cksum (CRC32) is only a bucketing hint for a filesystem-safe filename;
-    # it is not collision-free, so the project name is also stored alongside
-    # the path and re-checked verbatim below before anything is dropped —
-    # a cksum collision between two different project names can then never
-    # cause one project's task to be mistaken for another's.
-    _key="$(printf '%s' "$_p" | cksum | awk '{print $1}')"
-    # Record project name + absolute path of current winner (last in sort order)
-    printf '%s\t%s\n' "$_p" "$f" > "$_windir/$_key"
-  done <<EOF
-$_list
-EOF
-
-  _dropped=0
-  while IFS= read -r f; do
-    [ -n "$f" ] && [ -f "$f" ] || continue
-    _p="$(task_project "$f")"
-    # A shared literal here would bucket two different unparseable task
-    # files together and let one be silently coalesced away as a "duplicate"
-    # of the other; keying by the file's own (unique) basename instead means
-    # an unparseable task is never mistaken for a different one.
-    [ -n "$_p" ] || _p="__unknown__:$(basename -- "$f")"
-    _key="$(printf '%s' "$_p" | cksum | awk '{print $1}')"
-    _winner_line=""
-    if [ -f "$_windir/$_key" ]; then
-      _winner_line="$(cat "$_windir/$_key")"
-    fi
-    _winner_project="${_winner_line%%"$TAB"*}"
-    _winner="${_winner_line#*"$TAB"}"
-    if [ "$_winner_project" = "$_p" ] && [ -n "$_winner" ] && [ "$f" != "$_winner" ]; then
-      _base="$(basename -- "$f")"
-      _dest="$PROCESSED_DIR/${_base}.coalesced.$(date +%s).$$"
-      if mv "$f" "$_dest" 2>/dev/null; then
-        _dropped=$((_dropped + 1))
-        log "Coalesced (dropped older duplicate): $_base"
-      fi
-    fi
-  done <<EOF
-$_list
-EOF
-
-  rm -rf "$_windir"
-
-  if [ "$_dropped" -gt 0 ]; then
-    log "Coalesced $_dropped older task(s); keeping newest per project"
-  fi
-}
 
 # Claim the oldest pending task into processing/. Prints claimed path or nothing.
 claim_next_task() {

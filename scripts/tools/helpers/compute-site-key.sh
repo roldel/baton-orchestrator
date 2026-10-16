@@ -12,8 +12,8 @@ if [ $# -lt 1 ]; then
 fi
 
 PROJECT="$1"
-BASE_DIR="/opt/baton-orchestrator"
-PROJECT_DIR="/srv/projects/$PROJECT"
+BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
+PROJECT_DIR="${BATON_PROJECTS_ROOT:-/srv/projects}/$PROJECT"
 ENV_FILE="$PROJECT_DIR/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -21,9 +21,7 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Loaded via load_env_safe, not sourced directly: see that file's header for
-# why (a project's own .env sourced directly as shell code is arbitrary
-# command execution the instant an unquoted value contains e.g. `;`).
+# Load via load_env_safe. Do not source the project file.
 . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
 load_env_safe "$ENV_FILE"
 
@@ -32,11 +30,7 @@ if [ -z "${DOMAIN_NAME:-}" ]; then
   exit 1
 fi
 
-# SITE_KEY (= DOMAIN_NAME) is used as a path component by install-server-conf.sh,
-# sync-static-site.sh and render-server-conf.sh. Without this check, a project's
-# own .env could set DOMAIN_NAME to something like "../../../../etc/cron.d/pwn"
-# and have those scripts write attacker-chosen content outside their intended
-# directory, with the orchestrator's (root) privileges.
+# SITE_KEY is a single path segment: letters, digits, "." and "-" only.
 case "$DOMAIN_NAME" in
   .|..)
     echo "[compute-site-key] ERROR: DOMAIN_NAME cannot be '.' or '..'" >&2

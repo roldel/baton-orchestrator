@@ -19,12 +19,7 @@ echo "[webhook-deactivate] Deactivating webhook for project: $PROJECT"
 sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
 sh "$TOOLS_DIR/projects/validate-env.sh"    "$PROJECT" DOMAIN_NAME
 
-# DOMAIN_NAME drives WEBHOOK_CONF below, which this script `rm -f`s, so it's
-# resolved via compute-site-key.sh (not extracted raw) for its path-
-# traversal/character validation — a project's own .env setting DOMAIN_NAME
-# to a path-traversal value must not let this script delete an arbitrary
-# host file. compute-site-key.sh loads .env via load_env_safe, never
-# sourced directly, so TOOLS_DIR (reused below) can't be clobbered either.
+# DOMAIN_NAME comes from compute-site-key.sh, so the snippet path stays under webhooks.d.
 DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 
 WEBHOOK_CONF="/srv/baton-orchestrator/webhooks.d/${DOMAIN_NAME}-webhook.conf"
@@ -51,7 +46,10 @@ rm -f "$WEBHOOK_CONF"
 if ! sh "$TOOLS_DIR/nginx/test-config.sh"; then
     echo "[webhook-deactivate] ERROR: Nginx config broken after removal!" >&2
     echo "[webhook-deactivate] Restoring backup..." >&2
-    cp "$BACKUP_FILE" "$WEBHOOK_CONF" 2>/dev/null || true
+    if ! cp "$BACKUP_FILE" "$WEBHOOK_CONF"; then
+        echo "[webhook-deactivate] ERROR: failed to restore $WEBHOOK_CONF from $BACKUP_FILE" >&2
+        exit 1
+    fi
     exit 1
 fi
 

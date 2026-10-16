@@ -5,41 +5,39 @@ set -eu
 
 TASK_FILE="$1"
 LOG="/var/log/baton-webhook.log"
-LOCK="/tmp/baton-handle.lock"
 BACKUP=""
 PROCESSED_DIR="/srv/webhooks/processed"
 BASE_DIR="/opt/baton-orchestrator"
+BATON_PROJECTS_ROOT="${BATON_PROJECTS_ROOT:-/srv/projects}"
+BATON_REPOS_ROOT="${BATON_REPOS_ROOT:-/srv/repos}"
+BATON_CI_ROOT="${BATON_CI_ROOT:-/srv/ci}"
+BATON_SCRIPTS_ROOT="${BATON_SCRIPTS_ROOT:-/srv/scripts}"
+
+. "$BASE_DIR/scripts/tools/webhook/task-lib.sh"
+. "$BASE_DIR/scripts/tools/static/publish-lib.sh"
 
 log() {
     printf '%s - %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" | tee -a "$LOG"
 }
 
-# --- Atomic lock ---
-if ! mkdir "$LOCK" 2>/dev/null; then
-    log "Another instance is running. Waiting..."
-    # Implement a timeout for waiting for the lock, to prevent indefinite blocking.
-    # NOTE: no `local` here — this block runs at top level, not inside a function,
-    # and `local` outside a function aborts under busybox ash / dash + `set -e`.
-    wait_attempts=0
-    max_wait_attempts=60 # Wait up to 60 seconds
-    while [ -d "$LOCK" ] && [ "$wait_attempts" -lt "$max_wait_attempts" ]; do
-        sleep 1
-        wait_attempts=$((wait_attempts + 1))
-    done
-
-    if [ "$wait_attempts" -ge "$max_wait_attempts" ]; then
-        log "Failed to acquire lock after $max_wait_attempts seconds. Exiting."
-        exit 1
+# flock(1) is the lock holder. It exits when this script exits, and the kernel
+# drops the lock if flock itself is killed (SIGKILL included). A directory
+# lock left behind by a killed worker wedged every later task.
+if [ "${BATON_LOCK_HELD:-}" != 1 ]; then
+    if [ -n "${BATON_LOCK_FILE:-}" ]; then
+        _lock=$BATON_LOCK_FILE
+    elif [ -w /run ] 2>/dev/null; then
+        _lock=/run/baton-webhook.lock
+    else
+        _lock=/tmp/baton-webhook.lock
     fi
-
-    if ! mkdir "$LOCK" 2>/dev/null; then
-        log "Failed to acquire lock after waiting. Exiting."
-        exit 1
-    fi
+    export BATON_LOCK_HELD=1
+    # -o closes the lock fd in the child so a killed flock parent releases
+    # the lock even if git or compose is still running.
+    exec flock -o -w 60 "$_lock" "$0" "$@"
 fi
 
 cleanup() {
-    rmdir "$LOCK" 2>/dev/null || true
     if [ -n "${BACKUP:-}" ] && [ -d "$BACKUP" ]; then
         rm -rf "$BACKUP"
     fi
@@ -61,42 +59,34 @@ log "Processing $TASK_FILE"
 mkdir -p "$PROCESSED_DIR"
 
 # --- Safely load task variables ---
-load_task() {
-    local line key val
-    while IFS= read -r line || [ -n "$line" ]; do
-        case "$line" in
-            ''|'#'*) continue ;;
-        esac
-        # Validate KEY=VALUE format. Only the KEY is constrained (the anchored
-        # regex already forbids whitespace in it); the VALUE may legitimately
-        # contain spaces (e.g. a REPO_LOCATION path with a space). Assignment
-        # below is single-pass and injection-safe, so a spaced value is fine.
-        if printf '%s' "$line" | grep -Eq '^[A-Z_][A-Z0-9_]*='; then
-            key="${line%%=*}"
-            val="${line#*=}"
-            # Strip surrounding quotes
-            val="${val%\"}"; val="${val#\"}"
-            val="${val%\'}"; val="${val#\'}"
-            # POSIX-safe assignment
-            eval "$key=\"\$val\""
-            log "Loaded: $key=$val"
-        else
-            log "Ignored invalid line: $line"
-        fi
-    done < "$TASK_FILE"
-}
-load_task
+if ! baton_load_task_file "$TASK_FILE"; then
+    log "ERROR: rejected task file $TASK_FILE"
+    exit 1
+fi
+log "Loaded task for project ${PROJECT:-}"
 
-# --- Validate essential variables after loading ---
+[ -n "${PROJECT:-}" ] || { log "ERROR: PROJECT is not set in $TASK_FILE"; exit 1; }
 [ -n "${REPO_LOCATION:-}" ] || { log "ERROR: REPO_LOCATION is not set in $TASK_FILE"; exit 1; }
-[ -d "$REPO_LOCATION" ] || { log "ERROR: REPO_LOCATION '$REPO_LOCATION' does not exist or is not a directory."; exit 1; }
+if ! REPO_LOCATION=$(baton_repo_allowed "$PROJECT" "$REPO_LOCATION"); then
+    log "ERROR: REPO_LOCATION is outside the allowed roots"
+    exit 1
+fi
+export REPO_LOCATION
 
 if [ -n "${CUSTOM_REDEPLOY_SCRIPT_LOCATION:-}" ]; then
-    [ -x "$CUSTOM_REDEPLOY_SCRIPT_LOCATION" ] || { log "ERROR: Custom redeploy script '$CUSTOM_REDEPLOY_SCRIPT_LOCATION' not executable."; exit 1; }
+    if ! CUSTOM_REDEPLOY_SCRIPT_LOCATION=$(baton_script_allowed "$CUSTOM_REDEPLOY_SCRIPT_LOCATION" "$REPO_LOCATION"); then
+        log "ERROR: custom redeploy script is outside the allowed roots or is not an executable file"
+        exit 1
+    fi
+    export CUSTOM_REDEPLOY_SCRIPT_LOCATION
 fi
 
 if [ -n "${CI_PIPELINE_LOCATION:-}" ]; then
-    [ -x "$CI_PIPELINE_LOCATION" ] || { log "ERROR: CI pipeline script '$CI_PIPELINE_LOCATION' not executable."; exit 1; }
+    if ! CI_PIPELINE_LOCATION=$(baton_script_allowed "$CI_PIPELINE_LOCATION" "$REPO_LOCATION"); then
+        log "ERROR: CI pipeline script is outside the allowed roots or is not an executable file"
+        exit 1
+    fi
+    export CI_PIPELINE_LOCATION
 fi
 
 
@@ -127,11 +117,13 @@ cp -a "$REPO_LOCATION/." "$BACKUP/" || { log "Backup failed"; exit 1; }
 # (or in detached HEAD) still ends up on the intended ref.
 DEPLOY_BRANCH="${TARGET_BRANCH:-main}"
 log "git deploy of branch '$DEPLOY_BRANCH' in $REPO_LOCATION"
+# origin/ prefix keeps the revision from being parsed as an option. Trailing
+# -- ends the command; this git treats a -- placed before the revision as a path.
 if (
     cd "$REPO_LOCATION"
-    git fetch --all --prune
-    git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
-    git reset --hard "origin/$DEPLOY_BRANCH"
+    baton_git "$REPO_LOCATION" fetch --all --prune --
+    baton_git "$REPO_LOCATION" checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH" --
+    baton_git "$REPO_LOCATION" reset --hard "origin/$DEPLOY_BRANCH" --
 ) >>"$LOG" 2>&1; then
     log "git pull OK"
 else
@@ -213,7 +205,7 @@ fi
 # is never left paired with the new (unreleased) frontend.
 revert_static_publish() {
     if [ -n "$PREV_STATIC_RELEASE" ] && [ -d "$PREV_STATIC_RELEASE" ] && [ -n "$STATIC_SITE_LINK" ]; then
-        ln -sfn "$PREV_STATIC_RELEASE" "$STATIC_SITE_LINK"
+        baton_atomic_symlink "$PREV_STATIC_RELEASE" "$STATIC_SITE_LINK"
         log "Reverted static files to previous release: $PREV_STATIC_RELEASE"
     fi
 }
@@ -234,6 +226,15 @@ if [ "$DOCKER_COMPOSE_RESTART_REQUIRED_NORM" = "YES" ]; then
         sh "$COMPOSE_CMD" "$REPO_LOCATION" down >>"$LOG" 2>&1 || true
         if sh "$COMPOSE_CMD" "$REPO_LOCATION" up -d --build --force-recreate >>"$LOG" 2>&1; then
             log "Docker Compose UP OK"
+            # proxy_pass hostnames are resolved when nginx loads config. A
+            # recreated container keeps the old address until reload. Do not
+            # roll the containers back if reload fails; the task lands in failed/.
+            if ! sh "$BASE_DIR/scripts/tools/nginx/test-config.sh" >>"$LOG" 2>&1 \
+                || ! sh "$BASE_DIR/scripts/tools/nginx/reload.sh" >>"$LOG" 2>&1; then
+                log "ERROR: nginx reload failed after compose up"
+                exit 1
+            fi
+            log "nginx reloaded"
         else
             # `down` already stopped the old containers, so restoring only the
             # repo files would leave the site OFFLINE. Restore the previous code

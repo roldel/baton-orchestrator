@@ -35,16 +35,7 @@ if [ ! -f "$ORCHESTRATOR_COMPOSE" ]; then
 fi
 
 # --- Load env vars ---
-# Read in isolated subshells via load_env_safe, not sourced directly (see
-# that file's header): ORCHESTRATOR_COMPOSE is reused below to invoke
-# `docker compose`, and a project's own .env sourced directly could both
-# execute arbitrary commands immediately (e.g. a value containing `;`) and,
-# even if that were somehow survived, redefine ORCHESTRATOR_COMPOSE to point
-# `docker compose -f` at an attacker-authored compose file.
-# DOMAIN_NAME specifically is resolved via compute-site-key.sh rather than
-# extracted raw: it builds CERT_DIR below (and is passed to certbot), so
-# without compute-site-key.sh's path-traversal/character validation a
-# crafted DOMAIN_NAME could point certificate checks at an arbitrary path.
+# DOMAIN_NAME comes from compute-site-key.sh. Email and aliases are read in a subshell.
 LOAD_ENV_SAFE_SH="$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
 DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 DOMAIN_ADMIN_EMAIL="$(
@@ -76,18 +67,39 @@ CERT_DIR="/etc/letsencrypt/live/$DOMAIN_NAME"
 FULLCHAIN="$CERT_DIR/fullchain.pem"
 PRIVKEY="$CERT_DIR/privkey.pem"
 
-# --- If cert already exists, log and exit OK ---
+# --- If cert already exists, its DNS names must match the project ---
 if [ -f "$FULLCHAIN" ] && [ -f "$PRIVKEY" ]; then
   echo "[ensure-certs] Existing certificate found for $DOMAIN_NAME in $CERT_DIR"
 
-  if command -v openssl >/dev/null 2>&1; then
-    EXPIRY="$(openssl x509 -enddate -noout -in "$FULLCHAIN" 2>/dev/null | sed 's/^notAfter=//')"
-    echo "[ensure-certs] Certificate notAfter: $EXPIRY"
-  else
-    echo "[ensure-certs] Note: openssl not available, skipping expiry check."
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "[ensure-certs] ERROR: openssl is required to read the existing certificate" >&2
+    exit 1
   fi
 
-  # For now we only ensure presence; renewal logic can be added later.
+  if ! SAN="$(openssl x509 -noout -ext subjectAltName -in "$FULLCHAIN")"; then
+    echo "[ensure-certs] ERROR: could not read subjectAltName from $FULLCHAIN" >&2
+    exit 1
+  fi
+
+  . "$BASE_DIR/scripts/tools/helpers/check-domain-aliases.sh"
+  if ! ALIASES_NORM="$(baton_normalize_domain_aliases "${DOMAIN_ALIASES:-}")"; then
+    exit 1
+  fi
+  set -- "$DOMAIN_NAME"
+  for _alias in $ALIASES_NORM; do
+    [ -n "$_alias" ] || continue
+    set -- "$@" "$_alias"
+  done
+
+  . "$BASE_DIR/scripts/tools/ssl/san-lib.sh"
+  if ! baton_san_set_matches "$SAN" "$@"; then
+    echo "[ensure-certs] ERROR: certificate SANs do not match DOMAIN_NAME and DOMAIN_ALIASES" >&2
+    echo "[ensure-certs]        Reissue with: $BASE_DIR/scripts/tools/ssl/force-reissue-certs.sh $PROJECT" >&2
+    exit 1
+  fi
+
+  EXPIRY="$(openssl x509 -enddate -noout -in "$FULLCHAIN" | sed 's/^notAfter=//')" || true
+  echo "[ensure-certs] Certificate notAfter: ${EXPIRY:-unknown}"
   exit 0
 fi
 
@@ -102,14 +114,7 @@ if [ -n "${DOMAIN_ALIASES:-}" ]; then
   ALL_DOMAINS="$ALL_DOMAINS $ALIASES_CLEAN"
 fi
 
-# Each entry becomes a separate `-d <entry>` certbot argument below.
-# DOMAIN_ALIASES comes straight from the project's own .env with no
-# character validation (unlike render-server-conf.sh, which validates it
-# before substituting into nginx config) — and compute-site-key.sh's check
-# on DOMAIN_NAME constrains the character set but not a leading '-'. Without
-# this check, an entry such as "-d evil.com --manual-auth-hook /path" (or
-# simply a value starting with '-') would be parsed by certbot as extra
-# flags rather than a plain domain argument.
+# Each name is one certbot -d argument. Reject a leading '-' or a character outside [A-Za-z0-9.-].
 for d in $ALL_DOMAINS; do
   case "$d" in
     -*)

@@ -169,7 +169,8 @@ WEBHOOK_URL=/webhook # If webhook set on https://example.com/mywebhookurl our WE
 PAYLOAD_SIGNATURE=supersecret-shared-with-github
 
 # Optional
-REPO_LOCATION=/srv/projects/<project-name> # If different from standard /srv/projects/<project-name>
+# Unset uses /srv/projects/<project-name>. A checkout under /srv/repos is also allowed.
+# REPO_LOCATION=/srv/repos/<project-name>
 DOCKER_COMPOSE_RESTART_REQUIRED=NO # Auto rebuild and restart docker compose cluster upon redeploy
 TARGET_BRANCH=main
 COMMIT_DOCKER_COMPOSE_RESTART_TRIGGER=[restart-compose] # If DOCKER_COMPOSE_RESTART_REQUIRED=NO, allow possibility to trigger docker compose rebuild and restart on demand through commit message flag
@@ -184,9 +185,11 @@ COMMIT_DOCKER_COMPOSE_RESTART_TRIGGER=[restart-compose] # If DOCKER_COMPOSE_REST
 # If unset, auto-detects a single file: docker-compose.yml|.yaml or compose.yml|.yaml
 # DOCKER_COMPOSE_FILES=docker-compose.yml,docker-compose.override.yml
 
-CI_PIPELINE_LOCATION=/srv/ci/pipelines/myproject # If CI pipeline to be implemented
+# A set script must be an executable file under the repo, /srv/ci, or /srv/scripts.
+# CI_PIPELINE_LOCATION=/srv/ci/pipelines/myproject
 
-CUSTOM_REDEPLOY_SCRIPT_LOCATION=/srv/scripts/redeploy_myproject.sh # If non standard redeploy script to be executed
+# A set script must be an executable file under the repo, /srv/ci, or /srv/scripts.
+# CUSTOM_REDEPLOY_SCRIPT_LOCATION=/srv/scripts/redeploy_myproject.sh
 ```
 
 `server.conf`:
@@ -227,13 +230,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
-    # Reject requests whose Host header doesn't match the SNI hostname this
-    # connection's TLS handshake actually negotiated — stops a request from
-    # landing in a different project's server block (and its proxy_pass /
-    # webhook include) after encrypting with this project's cert. 421 is the
-    # HTTP/2-spec-correct response (RFC 7540 §9.1.2); a compliant client just
-    # retries on a fresh connection, so this is safe even for legitimate
-    # DOMAIN_ALIASES traffic coalesced onto one HTTP/2 connection.
+    # Host must equal the SNI name negotiated for this connection. Otherwise return 421.
     if ($host != $ssl_server_name) {
         return 421;
     }
@@ -362,13 +359,15 @@ DOMAIN_ALIASES=www.example.com
 WEBHOOK_URL=/webhook
 PAYLOAD_SIGNATURE=supersecret-shared-with-github
 
-REPO_LOCATION=/srv/projects/<project-name>
+# Unset uses /srv/projects/<project-name>. A checkout under /srv/repos is also allowed.
+# REPO_LOCATION=/srv/repos/<project-name>
 TARGET_BRANCH=main
 
 # If STATIC_SOURCE_DIR isn't already committed pre-built, point this at a
 # build script (e.g. running `npm run build`) — it runs after git pull and
 # before the static sync, so the sync always picks up freshly-built output.
-CI_PIPELINE_LOCATION=/srv/ci/pipelines/myproject
+# A set script must be an executable file under the repo, /srv/ci, or /srv/scripts.
+# CI_PIPELINE_LOCATION=/srv/ci/pipelines/myproject
 ```
 
 `server.conf`:
@@ -403,13 +402,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
-    # Reject requests whose Host header doesn't match the SNI hostname this
-    # connection's TLS handshake actually negotiated — stops a request from
-    # landing in a different project's server block (its webhook include /
-    # static root) after encrypting with this project's cert. 421 is the
-    # HTTP/2-spec-correct response (RFC 7540 §9.1.2); a compliant client just
-    # retries on a fresh connection, so this is safe even for legitimate
-    # DOMAIN_ALIASES traffic coalesced onto one HTTP/2 connection.
+    # Host must equal the SNI name negotiated for this connection. Otherwise return 421.
     if ($host != $ssl_server_name) {
         return 421;
     }

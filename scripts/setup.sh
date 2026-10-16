@@ -48,12 +48,11 @@ mkdir -p \
   "/etc/letsencrypt" \
   "/opt/baton-orchestrator/tmp/rendered"
 
-# The webhook container runs as a non-root UID 1000 (see orchestrator/webhook/
-# Dockerfile) and bind-mounts this directory read-write to enqueue redeploy
-# tasks; bind mounts match host/container permissions by raw UID number, so
-# the host directory needs to be owned by that same UID for the app to keep
-# working after dropping root.
-chown 1000:1000 "/srv/webhooks/queue"
+# The webhook container runs as UID/GID 65532 (see orchestrator/webhook/Dockerfile).
+# Mode 0700: only that user and root can create task files. Numeric chown,
+# because the host has no passwd entry for this id.
+chmod 0700 "/srv/webhooks/queue"
+chown 65532:65532 "/srv/webhooks/queue"
 
 
 # --- Script permissions ---

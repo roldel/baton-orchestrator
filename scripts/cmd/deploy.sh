@@ -79,13 +79,28 @@ STATIC_SOURCE_DIR="$(
   fi
 )"
 
+PREV_STATIC_RELEASE=""
+STATIC_SITE_LINK=""
 if [ "$STATIC_SITE" = "yes" ] || [ -n "$STATIC_SOURCE_DIR" ]; then
+  _deploy_site_key="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
+  STATIC_SITE_LINK="${BATON_SHARED_FILES_ROOT:-/srv/shared-files}/$_deploy_site_key/site"
+  if [ -L "$STATIC_SITE_LINK" ]; then
+    PREV_STATIC_RELEASE="$(readlink "$STATIC_SITE_LINK" 2>/dev/null || true)"
+  fi
   SYNCED_DIR="$(sh "$TOOLS_DIR/static/sync-static-site.sh" "$PROJECT")"
   echo "[deploy] Synced static files to: $SYNCED_DIR"
 fi
 
 if [ "$STATIC_SITE" != "yes" ]; then
-  sh "$TOOLS_DIR/projects/restart-containers.sh" "$PROJECT"
+  if ! sh "$TOOLS_DIR/projects/restart-containers.sh" "$PROJECT"; then
+    if [ -n "$PREV_STATIC_RELEASE" ] && [ -n "$STATIC_SITE_LINK" ]; then
+      . "$TOOLS_DIR/static/publish-lib.sh"
+      baton_atomic_symlink "$PREV_STATIC_RELEASE" "$STATIC_SITE_LINK"
+      echo "[deploy] Restored static files to $PREV_STATIC_RELEASE" >&2
+    fi
+    echo "[deploy] ERROR: container restart failed" >&2
+    exit 1
+  fi
 fi
 
 # 6) SSL: check certs; if missing → issue process for new certs
@@ -108,11 +123,7 @@ if [ "$ACTIVATE_WEBHOOK" -eq 1 ]; then
     echo "------------------------------------------------------------"
     echo "[deploy] --webhook flag set — activating webhook..."
 
-    # Verify the required webhook vars are present before attempting activation.
-    # Read in an isolated subshell, not sourced directly, like STATIC_SOURCE_DIR
-    # above: BASE_DIR is reused right below to invoke webhook-activate.sh, and
-    # a project's own .env sourced directly could redefine it, redirecting
-    # that call to an attacker-controlled script run with deploy.sh's privileges.
+    # Read the webhook variables in a subshell so the project file cannot replace BASE_DIR.
     WEBHOOK_URL="$(
         set +eu
         . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"

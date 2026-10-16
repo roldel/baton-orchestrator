@@ -10,6 +10,7 @@ LOGFILE="/var/log/baton-cert-renew.log"
 BASE_DIR="/opt/baton-orchestrator"
 LIVE_DIR="/etc/letsencrypt/live"
 ORCHESTRATOR_COMPOSE="$BASE_DIR/orchestrator/docker-compose.yml"
+TEST_CONFIG_SH="$BASE_DIR/scripts/tools/nginx/test-config.sh"
 RELOAD_SH="$BASE_DIR/scripts/tools/nginx/reload.sh"
 
 mkdir -p /var/log
@@ -44,16 +45,13 @@ renew_main() {
     return 1
   fi
 
-  # Checked explicitly with `||` rather than relying on `set -e`: this function
-  # is invoked as `if ! renew_main`, and calling a function as the condition of
-  # `if`/`!` suspends errexit for its *entire* body (not just the call site),
-  # so a failed mktemp would otherwise leave _tmp empty and silently redirect
-  # the checksum paths below to the filesystem root.
+  # Checked explicitly with `||` (belt-and-suspenders with the plain, un-
+  # conditional top-level call below, which is what actually keeps errexit
+  # active through this whole function — see the comment there).
   _tmp="$(mktemp -d "${TMPDIR:-/tmp}/baton-cert-renew.XXXXXX")" || {
     echo "[renew] ERROR: mktemp failed to create a temp directory." >&2
     return 1
   }
-  trap 'rm -rf "$_tmp"' EXIT INT TERM
 
   cert_checksums "$_tmp/before"
 
@@ -71,8 +69,16 @@ renew_main() {
     CHANGED=0
   else
     CHANGED=1
-    echo "[renew] Certificate files changed → reloading nginx..."
-    if ! sh "$RELOAD_SH"; then
+    echo "[renew] Certificate files changed → testing nginx config before reload..."
+    # reload.sh documents that it assumes `nginx -t` already passed; every
+    # other caller in this codebase (stand-down.sh, webhook-activate.sh) runs
+    # the test first, but this script previously didn't — so a config left
+    # broken by something unrelated would make reload.sh's signal a silent
+    # no-op against the still-broken config.
+    if ! sh "$TEST_CONFIG_SH"; then
+      echo "[renew] ERROR: nginx config test failed; skipping reload (config was already broken before this renewal)." >&2
+      FAIL=1
+    elif ! sh "$RELOAD_SH"; then
       echo "[renew] ERROR: nginx reload failed after certificate change." >&2
       FAIL=1
     fi
@@ -93,7 +99,24 @@ renew_main() {
   return 0
 }
 
-if ! renew_main >> "$LOGFILE" 2>&1; then
-  echo "ERROR: certificate renewal failed. See $LOGFILE" >&2
-  exit 1
-fi
+# Cleanup + failure reporting for renew_main, via a top-level EXIT trap
+# rather than `if ! renew_main`. Calling a function as the condition of
+# `if`/`!` (or of `&&`/`||`/`while`) suspends errexit for that call's *entire*
+# body in bash/dash — not just the call site — so e.g. a failing `find`/`sort`
+# inside cert_checksums(), or any other unguarded command, would silently
+# continue instead of aborting. Calling renew_main as a plain statement below
+# keeps -e genuinely active throughout its whole call tree; the EXIT trap
+# (which always runs, including when -e triggers the exit) does the reporting
+# that the old `if !` wrapper used to.
+_tmp=""
+on_exit() {
+  _status=$?
+  [ -n "$_tmp" ] && rm -rf "$_tmp"
+  if [ "$_status" -ne 0 ]; then
+    echo "ERROR: certificate renewal failed. See $LOGFILE" >&2
+  fi
+}
+trap on_exit EXIT
+trap 'exit 1' INT TERM
+
+renew_main >> "$LOGFILE" 2>&1

@@ -246,7 +246,11 @@ if [ "$DOCKER_COMPOSE_RESTART_REQUIRED_NORM" = "YES" ]; then
             exit 1
         fi
     else
-        log "WARNING: DOCKER_COMPOSE_RESTART_REQUIRED=YES but no compose file(s) found under '$REPO_LOCATION'."
+        log "ERROR: DOCKER_COMPOSE_RESTART_REQUIRED=YES but no compose file(s) found under '$REPO_LOCATION' → restoring"
+        restore_backup
+        revert_static_publish
+        mv "$TASK_FILE" "$PROCESSED_DIR/$(basename "$TASK_FILE").failed.$(date +%s)" 2>/dev/null || true
+        exit 1
     fi
 fi
 

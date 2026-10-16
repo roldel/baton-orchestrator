@@ -127,7 +127,11 @@ EOF
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
     _p="$(task_project "$f")"
-    [ -n "$_p" ] || _p="__unknown__"
+    # A shared literal here would bucket two different unparseable task
+    # files together and let one be silently coalesced away as a "duplicate"
+    # of the other; keying by the file's own (unique) basename instead means
+    # an unparseable task is never mistaken for a different one.
+    [ -n "$_p" ] || _p="__unknown__:$(basename -- "$f")"
     # cksum (CRC32) is only a bucketing hint for a filesystem-safe filename;
     # it is not collision-free, so the project name is also stored alongside
     # the path and re-checked verbatim below before anything is dropped —
@@ -144,7 +148,11 @@ EOF
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
     _p="$(task_project "$f")"
-    [ -n "$_p" ] || _p="__unknown__"
+    # A shared literal here would bucket two different unparseable task
+    # files together and let one be silently coalesced away as a "duplicate"
+    # of the other; keying by the file's own (unique) basename instead means
+    # an unparseable task is never mistaken for a different one.
+    [ -n "$_p" ] || _p="__unknown__:$(basename -- "$f")"
     _key="$(printf '%s' "$_p" | cksum | awk '{print $1}')"
     _winner_line=""
     if [ -f "$_windir/$_key" ]; then

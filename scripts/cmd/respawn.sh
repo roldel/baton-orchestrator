@@ -66,7 +66,16 @@ sh "$CMD_DIR/deploy.sh" "$PROJECT"
 if [ "$RESTORE_WEBHOOK" = "yes" ]; then
     echo "------------------------------------------------------------"
     echo "[respawn] Phase 3: Restoring Webhook"
-    sh "$CMD_DIR/webhook-activate.sh" "$PROJECT"
+    # stand-down.sh tolerates a webhook-deactivate.sh failure (warns and
+    # continues) rather than aborting the teardown, so the webhook may never
+    # actually have been removed. webhook-activate.sh hard-fails if its
+    # target config already exists, so check first instead of letting a
+    # tolerated warning above turn into a hard respawn failure here.
+    if [ -f "$CURRENT_WEBHOOK_CONF" ]; then
+        echo "[respawn] Webhook config already present at $CURRENT_WEBHOOK_CONF — it was never deactivated, nothing to restore."
+    else
+        sh "$CMD_DIR/webhook-activate.sh" "$PROJECT"
+    fi
 else
     echo "[respawn] No webhook was active previously; skipping activation."
 fi

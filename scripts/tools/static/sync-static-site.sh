@@ -30,10 +30,20 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# Read in an isolated subshell, not sourced into this shell directly: a
+# malformed .env would otherwise abort under set -eu, and a project .env
+# that happens to define BASE_DIR (or any other variable this script itself
+# relies on, e.g. for the compute-site-key.sh call below) would silently
+# clobber it, letting a project's .env redirect which script gets executed
+# with the orchestrator's privileges.
+STATIC_SOURCE_DIR="$(
+  set +eu
+  # shellcheck source=/dev/null
+  . "$ENV_FILE" >/dev/null 2>&1
+  printf '%s' "${STATIC_SOURCE_DIR:-}"
+)"
 
-if [ -z "${STATIC_SOURCE_DIR:-}" ]; then
+if [ -z "$STATIC_SOURCE_DIR" ]; then
   echo "[sync-static-site] ERROR: STATIC_SOURCE_DIR not set in $ENV_FILE" >&2
   exit 1
 fi
@@ -43,6 +53,21 @@ if [ ! -d "$SOURCE" ]; then
   echo "[sync-static-site] ERROR: STATIC_SOURCE_DIR '$STATIC_SOURCE_DIR' not found at $SOURCE" >&2
   exit 1
 fi
+
+# Resolve symlinks/".." and confirm the result is still inside PROJECT_DIR.
+# STATIC_SOURCE_DIR comes from the project's own .env; without this check a
+# value like "../../../../etc" would publish files from outside the
+# project's own directory to the public internet via nginx.
+RESOLVED_SOURCE="$(cd "$SOURCE" && pwd -P)"
+RESOLVED_PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
+case "$RESOLVED_SOURCE" in
+  "$RESOLVED_PROJECT_DIR"|"$RESOLVED_PROJECT_DIR"/*) ;;
+  *)
+    echo "[sync-static-site] ERROR: STATIC_SOURCE_DIR '$STATIC_SOURCE_DIR' resolves outside the project directory: $RESOLVED_SOURCE" >&2
+    exit 1
+    ;;
+esac
+SOURCE="$RESOLVED_SOURCE"
 
 SITE_KEY="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 
@@ -87,11 +112,16 @@ ln -sfn "$NEW_RELEASE" "$DEST"
 # Sort by NAME (release-<timestamp>-<pid>), not mtime: the timestamp prefix
 # sorts chronologically and is deterministic even when several releases share a
 # second (mtime-based ordering is unstable in that case and can skip a prune).
+# Tolerate failures here: the publish above already succeeded and `site` is
+# already live, so a stale release that can't be deleted (permission issue,
+# stale NFS handle, ...) must not make this script report failure — a caller
+# seeing a FAILED exit this late would roll the *backend* back while the new
+# frontend stays live (see handle-webhook.sh's static-publish handling).
 CURRENT="$(readlink "$DEST" 2>/dev/null || echo "$NEW_RELEASE")"
 ls -1d "$RELEASES_DIR"/release-* 2>/dev/null | sort -r | tail -n +4 | while IFS= read -r old; do
   [ "$old" = "$CURRENT" ] && continue
-  rm -rf "$old"
-done
+  rm -rf "$old" 2>/dev/null || echo "[sync-static-site] WARNING: could not prune old release: $old" >&2
+done || true
 # Sweep any stale staging dirs from interrupted runs.
 rm -rf "$RELEASES_DIR"/.staging-* 2>/dev/null || true
 

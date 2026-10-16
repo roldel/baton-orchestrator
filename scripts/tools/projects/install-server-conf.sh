@@ -60,5 +60,23 @@ cp -f "$SRC" "$DEST"
 
 echo "[install-server-conf] Installation complete: $DEST"
 
+# Atomic: this file is now live in conf.d, so validate the full nginx config
+# before considering the install done. A broken config left in place here
+# wouldn't break the *running* nginx (no reload has happened yet), but a
+# later full restart (host reboot, orchestrator-compose-respawn.sh) would
+# then fail to start nginx at all — taking down every project, not just
+# this one — so roll back to the pre-install state on failure instead.
+if ! sh "$BASE_DIR/scripts/tools/nginx/test-config.sh"; then
+  echo "[install-server-conf] ERROR: Nginx configuration test failed after installing $DEST" >&2
+  if [ -n "${BACKUP_FILE:-}" ] && [ -f "$BACKUP_FILE" ]; then
+    echo "[install-server-conf] Restoring previous config from backup: $BACKUP_FILE" >&2
+    cp -f "$BACKUP_FILE" "$DEST"
+  else
+    echo "[install-server-conf] No previous config existed — removing broken file: $DEST" >&2
+    rm -f "$DEST"
+  fi
+  exit 1
+fi
+
 # Print the final path (for logs / tooling if needed)
 echo "$DEST"

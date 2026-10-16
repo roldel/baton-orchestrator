@@ -32,6 +32,22 @@ if [ "${2:-}" = "--delete-files" ]; then
     DELETE_FILES=1
 fi
 
+# PROJECT is interpolated directly into PROJECT_DIR below, which --delete-files
+# then `rm -rf`s — unlike most other cmd/ scripts, this one doesn't go through
+# validate-exists.sh first, so the same path-traversal guard is applied here
+# directly: a name like "../../etc" must not be allowed to resolve outside
+# /srv/projects before a destructive rm -rf.
+case "$PROJECT" in
+    ''|.|..)
+        echo "ERROR: invalid project name: '$PROJECT'" >&2
+        exit 1
+        ;;
+    */*)
+        echo "ERROR: project name cannot contain '/': '$PROJECT'" >&2
+        exit 1
+        ;;
+esac
+
 PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
 
 # --- Root check ---

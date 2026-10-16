@@ -46,6 +46,20 @@ info() { printf "${CYAN}%-12s${RESET}" "$1"; }
 # and silently mishandled.
 if [ $# -ge 1 ]; then
     PROJECT_ARG="$1"
+    # PROJECT_ARG is interpolated directly into PROJECT_DIR below; reject a
+    # path-like value (e.g. "../../etc") before it can resolve outside
+    # /srv/projects and have this report (misleadingly) describe an
+    # arbitrary host directory.
+    case "$PROJECT_ARG" in
+        ''|.|..)
+            echo "ERROR: invalid project name: '$PROJECT_ARG'" >&2
+            exit 1
+            ;;
+        */*)
+            echo "ERROR: project name cannot contain '/': '$PROJECT_ARG'" >&2
+            exit 1
+            ;;
+    esac
     if [ ! -d "$PROJECTS_ROOT/$PROJECT_ARG" ]; then
         echo "ERROR: Project not found: $PROJECTS_ROOT/$PROJECT_ARG" >&2
         exit 1

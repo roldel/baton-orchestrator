@@ -83,7 +83,7 @@ load_env_safe() {
     esac
 
     case "$_lesf_line" in
-      [A-Z_][A-Z0-9_]*=*) ;;
+      *=*) ;;
       *)
         echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: not a KEY=VALUE line (KEY must be [A-Z_][A-Z0-9_]*): $_lesf_line" >&2
         return 1
@@ -92,6 +92,32 @@ load_env_safe() {
 
     _lesf_key="${_lesf_line%%=*}"
     _lesf_val="${_lesf_line#*=}"
+
+    # Validate the KEY in full. A glob's trailing `*` matches ANY characters
+    # at that position — it is not "more of the preceding bracket class" the
+    # way a regex quantifier would be — so `case "$_lesf_line" in
+    # [A-Z_][A-Z0-9_]*=*)` (the previous check here) only pinned down the
+    # first two characters of the line; everything between there and the
+    # first `=` was unchecked. That let a line like
+    # `AB$(cmd)=x` through, and $_lesf_key is interpolated unescaped into the
+    # `eval` below, so an unchecked key is arbitrary shell injection the
+    # instant that eval runs. Checking the extracted key against a
+    # negated-class glob (`*[!A-Z0-9_]*`, mirroring the technique already
+    # used correctly in compute-site-key.sh / validate-webhook-url.sh) is the
+    # correct way to constrain every character, not just the first two.
+    case "$_lesf_key" in
+      [A-Z_]*) ;;
+      *)
+        echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: not a KEY=VALUE line (KEY must be [A-Z_][A-Z0-9_]*): $_lesf_line" >&2
+        return 1
+        ;;
+    esac
+    case "$_lesf_key" in
+      *[!A-Z0-9_]*)
+        echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: not a KEY=VALUE line (KEY must be [A-Z_][A-Z0-9_]*): $_lesf_line" >&2
+        return 1
+        ;;
+    esac
 
     case "$_lesf_val" in
       \"*)

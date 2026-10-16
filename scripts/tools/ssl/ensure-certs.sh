@@ -102,6 +102,27 @@ if [ -n "${DOMAIN_ALIASES:-}" ]; then
   ALL_DOMAINS="$ALL_DOMAINS $ALIASES_CLEAN"
 fi
 
+# Each entry becomes a separate `-d <entry>` certbot argument below.
+# DOMAIN_ALIASES comes straight from the project's own .env with no
+# character validation (unlike render-server-conf.sh, which validates it
+# before substituting into nginx config) — and compute-site-key.sh's check
+# on DOMAIN_NAME constrains the character set but not a leading '-'. Without
+# this check, an entry such as "-d evil.com --manual-auth-hook /path" (or
+# simply a value starting with '-') would be parsed by certbot as extra
+# flags rather than a plain domain argument.
+for d in $ALL_DOMAINS; do
+  case "$d" in
+    -*)
+      echo "[ensure-certs] ERROR: domain entry '$d' cannot start with '-' (would be parsed as a certbot flag)" >&2
+      exit 1
+      ;;
+    *[!A-Za-z0-9.-]*)
+      echo "[ensure-certs] ERROR: domain entry '$d' contains characters unsafe for a certbot argument (only letters, digits, '.', '-' are allowed)" >&2
+      exit 1
+      ;;
+  esac
+done
+
 DOMAIN_ARGS=""
 for d in $ALL_DOMAINS; do
   DOMAIN_ARGS="$DOMAIN_ARGS -d $d"

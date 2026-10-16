@@ -122,15 +122,20 @@ EOF
   [ "$_count" -ge 2 ] || return 0
 
   _windir="$(mktemp -d /tmp/baton-coalesce.XXXXXX)" || return 0
+  TAB="$(printf '\t')"
 
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
     _p="$(task_project "$f")"
     [ -n "$_p" ] || _p="__unknown__"
-    # Stable, filesystem-safe key for the project name
+    # cksum (CRC32) is only a bucketing hint for a filesystem-safe filename;
+    # it is not collision-free, so the project name is also stored alongside
+    # the path and re-checked verbatim below before anything is dropped —
+    # a cksum collision between two different project names can then never
+    # cause one project's task to be mistaken for another's.
     _key="$(printf '%s' "$_p" | cksum | awk '{print $1}')"
-    # Record absolute path of current winner (last in sort order)
-    printf '%s\n' "$f" > "$_windir/$_key"
+    # Record project name + absolute path of current winner (last in sort order)
+    printf '%s\t%s\n' "$_p" "$f" > "$_windir/$_key"
   done <<EOF
 $_list
 EOF
@@ -141,11 +146,13 @@ EOF
     _p="$(task_project "$f")"
     [ -n "$_p" ] || _p="__unknown__"
     _key="$(printf '%s' "$_p" | cksum | awk '{print $1}')"
-    _winner=""
+    _winner_line=""
     if [ -f "$_windir/$_key" ]; then
-      _winner="$(cat "$_windir/$_key")"
+      _winner_line="$(cat "$_windir/$_key")"
     fi
-    if [ -n "$_winner" ] && [ "$f" != "$_winner" ]; then
+    _winner_project="${_winner_line%%"$TAB"*}"
+    _winner="${_winner_line#*"$TAB"}"
+    if [ "$_winner_project" = "$_p" ] && [ -n "$_winner" ] && [ "$f" != "$_winner" ]; then
       _base="$(basename -- "$f")"
       _dest="$PROCESSED_DIR/${_base}.coalesced.$(date +%s).$$"
       if mv "$f" "$_dest" 2>/dev/null; then

@@ -43,9 +43,15 @@ fi
 . "$ENV_FILE"
 
 # 2) Remove webhook (guarded on DOMAIN_NAME to avoid a spurious "missing
-# DOMAIN_NAME" failure from webhook-deactivate.sh if the .env is incomplete)
+# DOMAIN_NAME" failure from webhook-deactivate.sh if the .env is incomplete).
+# Tolerated like the `docker compose down` below: a transient failure here
+# (e.g. nginx reload) must not abort stand-down before containers are
+# stopped and the site's own nginx conf is removed — steps 5-6 re-test and
+# reload nginx anyway, which catches any lingering config problem.
 if [ -n "${DOMAIN_NAME:-}" ]; then
-  sh "$BASE_DIR/scripts/cmd/webhook-deactivate.sh" "$PROJECT"
+  sh "$BASE_DIR/scripts/cmd/webhook-deactivate.sh" "$PROJECT" || {
+    echo "[stand-down] WARNING: webhook deactivation failed; continuing with stand-down." >&2
+  }
 else
   echo "[stand-down] No DOMAIN_NAME set — skipping webhook deactivation"
 fi

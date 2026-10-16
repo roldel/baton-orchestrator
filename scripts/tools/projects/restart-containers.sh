@@ -44,7 +44,9 @@ fi
 
 # --- Restart containers ---
 echo "[restart-containers] docker compose down"
-sh "$COMPOSE_CMD" "$PROJECT_DIR" down
+sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
+  echo "[restart-containers] WARNING: docker compose down failed (containers may already be stopped)." >&2
+}
 
 echo "[restart-containers] docker compose up -d --build --force-recreate"
 sh "$COMPOSE_CMD" "$PROJECT_DIR" up -d --build --force-recreate

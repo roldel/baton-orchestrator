@@ -51,7 +51,11 @@ fi
 # 3. Execute Stand Down
 echo "------------------------------------------------------------"
 echo "[respawn] Phase 1: Standing Down"
-sh "$CMD_DIR/stand-down.sh" "$PROJECT"
+if ! sh "$CMD_DIR/stand-down.sh" "$PROJECT"; then
+    echo "[respawn] ERROR: stand-down failed for '$PROJECT' — aborting before deploy" >&2
+    echo "[respawn]        to avoid deploying on top of a partial teardown." >&2
+    exit 1
+fi
 
 # 4. Execute Deploy
 echo "------------------------------------------------------------"

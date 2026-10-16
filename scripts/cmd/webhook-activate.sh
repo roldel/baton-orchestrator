@@ -36,7 +36,11 @@ set -a # Start auto-exporting
 set +a # Stop auto-exporting
 
 # 4. Validate the format of WEBHOOK_URL
-"$VALIDATE_WEBHOOK_URL" "$WEBHOOK_URL"
+if [ ! -x "$VALIDATE_WEBHOOK_URL" ]; then
+    echo "[webhook-activate] ERROR: validate-webhook-url script not found or not executable: $VALIDATE_WEBHOOK_URL" >&2
+    exit 1
+fi
+sh "$VALIDATE_WEBHOOK_URL" "$WEBHOOK_URL"
 
 
 # 5. BLOCKING: refuse to proceed unless site is fully live

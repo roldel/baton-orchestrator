@@ -120,6 +120,38 @@ def create_task_file(project, env, signal_dir, restart_required):
         f"task_{timestamp}_{os.getpid()}_{uuid.uuid4().hex[:8]}_{safe_project}.baton"
     )
 
+    # Branch to deploy. The handler resets the working tree to
+    # origin/<TARGET_BRANCH>, so this must be carried through explicitly —
+    # otherwise the handler falls back to whatever branch the on-disk
+    # checkout happens to point at. Mirrors the default used for the
+    # branch filter in process_webhook_request.
+    target_branch = env.get("TARGET_BRANCH") or "main"
+
+    # REPO_LOCATION is now guaranteed upstream in process_webhook_request,
+    # but we still guard defensively here.
+    repo_location = env.get("REPO_LOCATION") or ""
+    ci_pipeline_location = env.get("CI_PIPELINE_LOCATION") or ""
+    custom_redeploy_script_location = env.get("CUSTOM_REDEPLOY_SCRIPT_LOCATION") or ""
+
+    # This task file is sourced line-by-line by handle-webhook.sh, so a value
+    # containing a newline would inject an extra `KEY=VALUE` line — including
+    # a second PROJECT= that would override which project the rest of the
+    # file applies to. These values come from a project's own .env, and
+    # python-dotenv turns a `\n` escape inside a double-quoted value into a
+    # real newline, so this is reachable by any project's own config, not
+    # just a corrupted file. Validate before writing anything, so a rejected
+    # task never leaves a half-written temp file behind.
+    for key, value in (
+        ("PROJECT", project),
+        ("TARGET_BRANCH", target_branch),
+        ("REPO_LOCATION", repo_location),
+        ("DOCKER_COMPOSE_RESTART_REQUIRED", restart_required),
+        ("CI_PIPELINE_LOCATION", ci_pipeline_location),
+        ("CUSTOM_REDEPLOY_SCRIPT_LOCATION", custom_redeploy_script_location),
+    ):
+        if "\n" in str(value) or "\r" in str(value):
+            raise ValueError(f"{key} must not contain a newline")
+
     # Create temp file in the same dir to allow atomic rename
     with tempfile.NamedTemporaryFile(
         mode="w", dir=signal_dir, delete=False
@@ -128,37 +160,22 @@ def create_task_file(project, env, signal_dir, restart_required):
 
         # Mandatory
         temp_file.write(f"PROJECT={project}\n")
-
-        # Branch to deploy. The handler resets the working tree to
-        # origin/<TARGET_BRANCH>, so this must be carried through explicitly —
-        # otherwise the handler falls back to whatever branch the on-disk
-        # checkout happens to point at. Mirrors the default used for the
-        # branch filter in process_webhook_request.
-        target_branch = env.get("TARGET_BRANCH") or "main"
         temp_file.write(f"TARGET_BRANCH={target_branch}\n")
 
-        # REPO_LOCATION is now guaranteed upstream in process_webhook_request,
-        # but we still guard defensively here.
-        if "REPO_LOCATION" in env and env["REPO_LOCATION"]:
-            temp_file.write(f'REPO_LOCATION={env["REPO_LOCATION"]}\n')
+        if repo_location:
+            temp_file.write(f"REPO_LOCATION={repo_location}\n")
 
         # Docker compose restart decision
         temp_file.write(f"DOCKER_COMPOSE_RESTART_REQUIRED={restart_required}\n")
 
         # Optional CI pipeline
-        if "CI_PIPELINE_LOCATION" in env and env["CI_PIPELINE_LOCATION"]:
-            temp_file.write(
-                f'CI_PIPELINE_LOCATION={env["CI_PIPELINE_LOCATION"]}\n'
-            )
+        if ci_pipeline_location:
+            temp_file.write(f"CI_PIPELINE_LOCATION={ci_pipeline_location}\n")
 
         # Optional custom redeploy script
-        if (
-            "CUSTOM_REDEPLOY_SCRIPT_LOCATION" in env
-            and env["CUSTOM_REDEPLOY_SCRIPT_LOCATION"]
-        ):
+        if custom_redeploy_script_location:
             temp_file.write(
-                "CUSTOM_REDEPLOY_SCRIPT_LOCATION="
-                f'{env["CUSTOM_REDEPLOY_SCRIPT_LOCATION"]}\n'
+                f"CUSTOM_REDEPLOY_SCRIPT_LOCATION={custom_redeploy_script_location}\n"
             )
 
     # Atomic rename

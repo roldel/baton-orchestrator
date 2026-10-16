@@ -35,8 +35,34 @@ if [ ! -f "$ORCHESTRATOR_COMPOSE" ]; then
 fi
 
 # --- Load env vars ---
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# Read in isolated subshells via load_env_safe, not sourced directly (see
+# that file's header): ORCHESTRATOR_COMPOSE is reused below to invoke
+# `docker compose`, and a project's own .env sourced directly could both
+# execute arbitrary commands immediately (e.g. a value containing `;`) and,
+# even if that were somehow survived, redefine ORCHESTRATOR_COMPOSE to point
+# `docker compose -f` at an attacker-authored compose file.
+LOAD_ENV_SAFE_SH="$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+DOMAIN_NAME="$(
+  set +eu
+  . "$LOAD_ENV_SAFE_SH"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_NAME:-}"
+  fi
+)"
+DOMAIN_ADMIN_EMAIL="$(
+  set +eu
+  . "$LOAD_ENV_SAFE_SH"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_ADMIN_EMAIL:-}"
+  fi
+)"
+DOMAIN_ALIASES="$(
+  set +eu
+  . "$LOAD_ENV_SAFE_SH"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_ALIASES:-}"
+  fi
+)"
 
 if [ -z "${DOMAIN_NAME:-}" ]; then
   echo "[ensure-certs] ERROR: DOMAIN_NAME must be set in .env" >&2

@@ -38,9 +38,10 @@ fi
 # with the orchestrator's privileges.
 STATIC_SOURCE_DIR="$(
   set +eu
-  # shellcheck source=/dev/null
-  . "$ENV_FILE" >/dev/null 2>&1
-  printf '%s' "${STATIC_SOURCE_DIR:-}"
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${STATIC_SOURCE_DIR:-}"
+  fi
 )"
 
 if [ -z "$STATIC_SOURCE_DIR" ]; then

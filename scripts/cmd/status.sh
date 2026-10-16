@@ -80,11 +80,28 @@ for PROJECT in "$@"; do
     STATIC_SITE="no"
     DOMAIN_NAME=""
 
+    # Read in isolated subshells via load_env_safe, not sourced directly
+    # (see that file's header): RESOLVE_HELPER/COMPOSE_CMD (both derived
+    # from BASE_DIR) are reused below and get `sh`'d, so a project's own
+    # .env sourced directly could redirect those calls to an
+    # attacker-controlled script, on top of being able to execute arbitrary
+    # commands immediately just by being sourced at all.
     if [ -f "$ENV_FILE" ]; then
-        # shellcheck source=/dev/null
-        . "$ENV_FILE"
-        STATIC_SITE="${STATIC_SITE:-no}"
-        DOMAIN_NAME="${DOMAIN_NAME:-}"
+        STATIC_SITE="$(
+            set +eu
+            . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+            if load_env_safe "$ENV_FILE"; then
+                printf '%s' "${STATIC_SITE:-no}"
+            fi
+        )"
+        [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
+        DOMAIN_NAME="$(
+            set +eu
+            . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+            if load_env_safe "$ENV_FILE"; then
+                printf '%s' "${DOMAIN_NAME:-}"
+            fi
+        )"
     fi
 
     # --- HOST column ---

@@ -29,11 +29,29 @@ sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" \
     DOMAIN_NAME WEBHOOK_URL PAYLOAD_SIGNATURE
 
 # 3. Load project env
-# --- Load .env and export everything so envsubst can see them ---
-set -a # Start auto-exporting
-# shellcheck source=/dev/null # This is an intentional source
-. "$ENV_FILE"
-set +a # Stop auto-exporting
+# Read in isolated subshells, not sourced directly: TOOLS_DIR, WEBHOOK_DIR,
+# TEMPLATE and VALIDATE_WEBHOOK_URL are all reused below, and a project's
+# own .env sourced directly could redefine any of them — e.g. pointing
+# VALIDATE_WEBHOOK_URL at /bin/true to bypass the nginx-injection check on
+# WEBHOOK_URL just below. envsubst is explicitly scoped to DOMAIN_NAME and
+# WEBHOOK_URL only (see the envsubst call further down), so those are the
+# only two values this script actually needs out of the project's .env.
+LOAD_ENV_SAFE_SH="$HELPERS_DIR/load-env-safe.sh"
+DOMAIN_NAME="$(
+  set +eu
+  . "$LOAD_ENV_SAFE_SH"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_NAME:-}"
+  fi
+)"
+WEBHOOK_URL="$(
+  set +eu
+  . "$LOAD_ENV_SAFE_SH"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${WEBHOOK_URL:-}"
+  fi
+)"
+export DOMAIN_NAME WEBHOOK_URL
 
 # 4. Validate the format of WEBHOOK_URL
 if [ ! -x "$VALIDATE_WEBHOOK_URL" ]; then

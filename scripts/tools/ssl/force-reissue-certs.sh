@@ -46,8 +46,18 @@ if [ ! -x "$ENSURE_CERTS" ]; then
 fi
 
 # --- Load env vars ---
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# Read in an isolated subshell, not sourced directly: ORCHESTRATOR_COMPOSE
+# and ENSURE_CERTS are both reused below, and a project's own .env sourced
+# directly could redefine either, redirecting those calls to an
+# attacker-controlled script run with this script's privileges — right
+# after the real certificate lineage has already been deleted via certbot.
+DOMAIN_NAME="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_NAME:-}"
+  fi
+)"
 
 if [ -z "${DOMAIN_NAME:-}" ]; then
   echo "[force-reissue-certs] ERROR: DOMAIN_NAME must be set in .env" >&2

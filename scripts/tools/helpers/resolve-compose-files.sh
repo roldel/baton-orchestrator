@@ -20,6 +20,8 @@
 
 set -eu
 
+BASE_DIR="/opt/baton-orchestrator"
+
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <project-dir> [compose-file ...]" >&2
   exit 1
@@ -64,9 +66,10 @@ else
   if [ -f "$ENV_FILE" ]; then
     COMPOSE_LIST="$(
       set +eu
-      # shellcheck source=/dev/null
-      . "$ENV_FILE" >/dev/null 2>&1
-      printf '%s' "${DOCKER_COMPOSE_FILES:-}"
+      . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+      if load_env_safe "$ENV_FILE"; then
+        printf '%s' "${DOCKER_COMPOSE_FILES:-}"
+      fi
     )"
   fi
 

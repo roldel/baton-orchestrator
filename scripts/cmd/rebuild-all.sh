@@ -94,8 +94,32 @@ classify_webhook() {
         return 0
     fi
 
-    # shellcheck source=/dev/null
-    . "$_env"
+    # Read in isolated subshells, not sourced into this shell directly: this
+    # function is called once per project, and a project's .env sourced
+    # directly could redefine CMD_DIR/WEBHOOKS_DIR/etc. for the REST of this
+    # script's run — hijacking which script executes for every other
+    # project. `set +eu` keeps a malformed .env from aborting under set -eu.
+    DOMAIN_NAME="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$_env"; then
+            printf '%s' "${DOMAIN_NAME:-}"
+        fi
+    )"
+    WEBHOOK_URL="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$_env"; then
+            printf '%s' "${WEBHOOK_URL:-}"
+        fi
+    )"
+    PAYLOAD_SIGNATURE="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$_env"; then
+            printf '%s' "${PAYLOAD_SIGNATURE:-}"
+        fi
+    )"
 
     if [ -z "${DOMAIN_NAME:-}" ] || [ -z "${WEBHOOK_URL:-}" ] || [ -z "${PAYLOAD_SIGNATURE:-}" ]; then
         WEBHOOK_PLAN="skip"
@@ -132,14 +156,21 @@ for PROJECT_DIR in "$PROJECTS_ROOT"/*; do
     [ -d "$PROJECT_DIR" ] || continue
     PROJECT="${PROJECT_DIR##*/}"
 
-    # Reset .env-sourced var before each iteration to prevent bleed
-    STATIC_SITE="no"
-
+    # Read in an isolated subshell, not sourced into this shell directly:
+    # this runs once per project before CMD_DIR is used in the rebuild loop
+    # below, so a project's .env sourced directly here could redefine CMD_DIR
+    # (or any other variable this script relies on) for the rest of the run.
     ENV_FILE="$PROJECT_DIR/.env"
+    STATIC_SITE="no"
     if [ -f "$ENV_FILE" ]; then
-        # shellcheck source=/dev/null
-        . "$ENV_FILE"
-        STATIC_SITE="${STATIC_SITE:-no}"
+        STATIC_SITE="$(
+            set +eu
+            . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+            if load_env_safe "$ENV_FILE"; then
+                printf '%s' "${STATIC_SITE:-no}"
+            fi
+        )"
+        [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
     fi
 
     if [ "$STATIC_SITE" = "yes" ]; then

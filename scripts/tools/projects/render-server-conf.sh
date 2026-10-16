@@ -45,18 +45,51 @@ command -v envsubst >/dev/null 2>&1 || { echo "[render-server-conf] ERROR: envsu
 
 mkdir -p "$TMP_DIR"
 
-# --- Load .env and export everything so envsubst can see them ---
-# set -a makes all subsequent variable assignments automatically exported
-set -a
-# shellcheck source=/dev/null
-. "$ENV_FILE"
-set +a # Disable auto-exporting after .env is sourced
+# --- Load .env safely and export everything so envsubst can see them ---
+# load_env_safe (see its header) never executes the file's content as shell
+# code, unlike direct sourcing — a value containing e.g. `;` would otherwise
+# run an arbitrary command the instant this line is sourced. It exports
+# everything it loads, matching the old `set -a` behavior. It loads into
+# THIS shell rather than an isolated subshell, because envsubst further down
+# needs to see whatever arbitrary extra vars a project's server.conf
+# template references — so the trusted path variables above are snapshotted
+# first and restored right after, in case the project's own .env tried to
+# redefine any of them (e.g. BASE_DIR, reused below for compute-site-key.sh).
+_RSC_BASE_DIR="$BASE_DIR"
+_RSC_PROJECT_DIR="$PROJECT_DIR"
+_RSC_ENV_FILE="$ENV_FILE"
+_RSC_TEMPLATE="$TEMPLATE"
+_RSC_TMP_DIR="$TMP_DIR"
+
+. "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+load_env_safe "$ENV_FILE"
+
+BASE_DIR="$_RSC_BASE_DIR"
+PROJECT_DIR="$_RSC_PROJECT_DIR"
+ENV_FILE="$_RSC_ENV_FILE"
+TEMPLATE="$_RSC_TEMPLATE"
+TMP_DIR="$_RSC_TMP_DIR"
+unset _RSC_BASE_DIR _RSC_PROJECT_DIR _RSC_ENV_FILE _RSC_TEMPLATE _RSC_TMP_DIR
 
 # --- Normalize comma-separated aliases for Nginx (space-separated is standard) ---
 # Ensure DOMAIN_ALIASES is exported after normalization
 DOMAIN_ALIASES="$(echo "${DOMAIN_ALIASES:-}" | tr ',' ' ' | tr -s ' ')"
 export DOMAIN_ALIASES
 echo "[render-server-conf] Normalized DOMAIN_ALIASES='${DOMAIN_ALIASES:-}'" >&2
+
+# DOMAIN_ALIASES is substituted unescaped via envsubst into `server_name`
+# below (DOMAIN_NAME itself is validated as SITE_KEY by compute-site-key.sh,
+# called further down, before envsubst runs) — without this check, an alias
+# containing nginx-significant characters could inject directives into the
+# shared orchestrator nginx config.
+for _alias in $DOMAIN_ALIASES; do
+  case "$_alias" in
+    *[!A-Za-z0-9.-]*)
+      echo "[render-server-conf] ERROR: DOMAIN_ALIASES entry '$_alias' contains characters unsafe for an nginx server_name (only letters, digits, '.', '-' are allowed)" >&2
+      exit 1
+      ;;
+  esac
+done
 
 # --- Static-site flag + SITE_KEY (SITE_KEY = $DOMAIN_NAME, namespaces the
 # conf.d filename and shared-files dir per project) ---

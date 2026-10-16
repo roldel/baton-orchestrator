@@ -19,9 +19,17 @@ echo "[webhook-deactivate] Deactivating webhook for project: $PROJECT"
 sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
 sh "$TOOLS_DIR/projects/validate-env.sh"    "$PROJECT" DOMAIN_NAME
 
-# Load DOMAIN_NAME from project's .env
-# shellcheck source=/dev/null
-. "/srv/projects/$PROJECT/.env"
+# Read in an isolated subshell, not sourced into this shell directly:
+# TOOLS_DIR is reused below (nginx test-config.sh/reload.sh calls), and a
+# project's own .env sourced directly could redefine it, redirecting those
+# calls to an attacker-controlled script run with this script's privileges.
+DOMAIN_NAME="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "/srv/projects/$PROJECT/.env"; then
+    printf '%s' "${DOMAIN_NAME:-}"
+  fi
+)"
 
 WEBHOOK_CONF="/srv/baton-orchestrator/webhooks.d/${DOMAIN_NAME}-webhook.conf"
 

@@ -170,13 +170,18 @@ STATIC_SOURCE_DIR=""
 if [ -n "${PROJECT:-}" ] && [ -f "$PROJECT_ENV" ]; then
     STATIC_SITE="$(
         set +eu
-        . "$PROJECT_ENV" >/dev/null 2>&1
-        printf '%s' "${STATIC_SITE:-no}"
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$PROJECT_ENV"; then
+            printf '%s' "${STATIC_SITE:-no}"
+        fi
     )"
+    [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
     STATIC_SOURCE_DIR="$(
         set +eu
-        . "$PROJECT_ENV" >/dev/null 2>&1
-        printf '%s' "${STATIC_SOURCE_DIR:-}"
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$PROJECT_ENV"; then
+            printf '%s' "${STATIC_SOURCE_DIR:-}"
+        fi
     )"
 fi
 

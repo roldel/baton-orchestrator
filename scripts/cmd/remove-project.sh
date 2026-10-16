@@ -76,9 +76,17 @@ echo "[remove] Step 2/3 — Preserved resources (manual cleanup if needed):"
 
 ENV_FILE="$PROJECT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
-    # shellcheck source=/dev/null
-    . "$ENV_FILE"
-    DOMAIN_NAME="${DOMAIN_NAME:-}"
+    # Read in an isolated subshell via load_env_safe, not sourced directly
+    # (see that file's header) — a project's own .env sourced directly can
+    # execute arbitrary commands the instant it's sourced, regardless of
+    # whether anything reuses the loaded values afterward.
+    DOMAIN_NAME="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$ENV_FILE"; then
+            printf '%s' "${DOMAIN_NAME:-}"
+        fi
+    )"
 
     CERT_DIR="/etc/letsencrypt/live/${DOMAIN_NAME}"
     SHARED_FILES="/srv/shared-files/${DOMAIN_NAME}"

@@ -39,8 +39,26 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# Read in isolated subshells, not sourced into this shell directly: BASE_DIR
+# and TOOLS_DIR are both reused below (to locate webhook-deactivate.sh and
+# the nginx helpers), and a project's own .env sourced directly could
+# redefine either, redirecting those calls to an attacker-controlled script
+# run with this script's (root) privileges.
+DOMAIN_NAME="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_NAME:-}"
+  fi
+)"
+STATIC_SITE="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${STATIC_SITE:-no}"
+  fi
+)"
+[ -n "$STATIC_SITE" ] || STATIC_SITE="no"
 
 # 2) Remove webhook (guarded on DOMAIN_NAME to avoid a spurious "missing
 # DOMAIN_NAME" failure from webhook-deactivate.sh if the .env is incomplete).
@@ -57,7 +75,6 @@ else
 fi
 
 # 3) Stop project containers (static sites have no compose file / container)
-STATIC_SITE="${STATIC_SITE:-no}"
 if [ "$STATIC_SITE" = "yes" ]; then
   echo "[stand-down] Static site — no containers to stop"
 else

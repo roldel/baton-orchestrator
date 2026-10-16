@@ -73,9 +73,10 @@ echo "[deploy] Rendered server config at: $RENDERED_FILE"
 # Read the variable in a subshell so this .env cannot clobber the script.
 STATIC_SOURCE_DIR="$(
   set +eu
-  # shellcheck source=/dev/null
-  . "$PROJECT_DIR/.env" >/dev/null 2>&1
-  printf '%s' "${STATIC_SOURCE_DIR:-}"
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$PROJECT_DIR/.env"; then
+    printf '%s' "${STATIC_SOURCE_DIR:-}"
+  fi
 )"
 
 if [ "$STATIC_SITE" = "yes" ] || [ -n "$STATIC_SOURCE_DIR" ]; then
@@ -107,11 +108,25 @@ if [ "$ACTIVATE_WEBHOOK" -eq 1 ]; then
     echo "------------------------------------------------------------"
     echo "[deploy] --webhook flag set — activating webhook..."
 
-    # Verify the required webhook vars are present before attempting activation
-    # shellcheck source=/dev/null
-    . "$PROJECT_DIR/.env"
-    WEBHOOK_URL="${WEBHOOK_URL:-}"
-    PAYLOAD_SIGNATURE="${PAYLOAD_SIGNATURE:-}"
+    # Verify the required webhook vars are present before attempting activation.
+    # Read in an isolated subshell, not sourced directly, like STATIC_SOURCE_DIR
+    # above: BASE_DIR is reused right below to invoke webhook-activate.sh, and
+    # a project's own .env sourced directly could redefine it, redirecting
+    # that call to an attacker-controlled script run with deploy.sh's privileges.
+    WEBHOOK_URL="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$PROJECT_DIR/.env"; then
+            printf '%s' "${WEBHOOK_URL:-}"
+        fi
+    )"
+    PAYLOAD_SIGNATURE="$(
+        set +eu
+        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+        if load_env_safe "$PROJECT_DIR/.env"; then
+            printf '%s' "${PAYLOAD_SIGNATURE:-}"
+        fi
+    )"
 
     if [ -z "$WEBHOOK_URL" ] || [ -z "$PAYLOAD_SIGNATURE" ]; then
         echo "[deploy] ERROR: --webhook requested but WEBHOOK_URL or PAYLOAD_SIGNATURE" >&2

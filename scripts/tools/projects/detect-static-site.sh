@@ -14,6 +14,7 @@ if [ $# -lt 1 ]; then
 fi
 
 PROJECT="$1"
+BASE_DIR="/opt/baton-orchestrator"
 PROJECT_DIR="/srv/projects/$PROJECT"
 ENV_FILE="$PROJECT_DIR/.env"
 
@@ -22,8 +23,11 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# Loaded via load_env_safe, not sourced directly: see that file's header for
+# why (a project's own .env sourced directly as shell code is arbitrary
+# command execution the instant an unquoted value contains e.g. `;`).
+. "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+load_env_safe "$ENV_FILE"
 
 STATIC_SITE="${STATIC_SITE:-no}"
 

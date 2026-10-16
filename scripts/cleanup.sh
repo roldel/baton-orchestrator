@@ -68,8 +68,11 @@ if [ -f "$CRON_FILE" ]; then
         echo "[cleanup] Removing cert renewal cron job(s) from $CRON_FILE..."
         TMP_FILE="$(mktemp)"
 
-        # Remove any line that references the renewal script
-        grep -v "$CRON_MARKER" "$CRON_FILE" > "$TMP_FILE"
+        # Remove any line that references the renewal script. `grep -v`
+        # exits 1 (not an error — just "no lines selected") when every line
+        # matches the marker, e.g. a crontab with only this one job; under
+        # set -eu that would otherwise abort cleanup.sh before it finishes.
+        grep -v "$CRON_MARKER" "$CRON_FILE" > "$TMP_FILE" || true
 
         # Preserve perms and replace atomically
         chmod --reference="$CRON_FILE" "$TMP_FILE" 2>/dev/null || chmod 600 "$TMP_FILE"

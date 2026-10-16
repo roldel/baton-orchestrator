@@ -44,7 +44,15 @@ renew_main() {
     return 1
   fi
 
-  _tmp="$(mktemp -d "${TMPDIR:-/tmp}/baton-cert-renew.XXXXXX")"
+  # Checked explicitly with `||` rather than relying on `set -e`: this function
+  # is invoked as `if ! renew_main`, and calling a function as the condition of
+  # `if`/`!` suspends errexit for its *entire* body (not just the call site),
+  # so a failed mktemp would otherwise leave _tmp empty and silently redirect
+  # the checksum paths below to the filesystem root.
+  _tmp="$(mktemp -d "${TMPDIR:-/tmp}/baton-cert-renew.XXXXXX")" || {
+    echo "[renew] ERROR: mktemp failed to create a temp directory." >&2
+    return 1
+  }
   trap 'rm -rf "$_tmp"' EXIT INT TERM
 
   cert_checksums "$_tmp/before"

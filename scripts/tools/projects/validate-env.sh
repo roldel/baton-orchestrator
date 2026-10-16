@@ -16,7 +16,7 @@ ENV_FILE="$PROJECT_DIR/.env"
 echo "[validate-env] Validating env file: $ENV_FILE"
 
 if [ ! -f "$ENV_FILE" ]; then
-  echo "[deploy:20] ERROR: Missing .env file: $ENV_FILE" >&2
+  echo "[validate-env] ERROR: Missing .env file: $ENV_FILE" >&2
   exit 1
 fi
 

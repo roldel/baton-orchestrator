@@ -41,18 +41,26 @@ fail() { printf "${RED}%-12s${RESET}" "$1"; }
 info() { printf "${CYAN}%-12s${RESET}" "$1"; }
 
 # --- Resolve project list ---
+# Built via positional params, not a space-joined string: a project directory
+# name containing a space would otherwise be word-split by `for X in $LIST`
+# and silently mishandled.
 if [ $# -ge 1 ]; then
-    PROJECTS="$1"
-    if [ ! -d "$PROJECTS_ROOT/$PROJECTS" ]; then
-        echo "ERROR: Project not found: $PROJECTS_ROOT/$PROJECTS" >&2
+    PROJECT_ARG="$1"
+    if [ ! -d "$PROJECTS_ROOT/$PROJECT_ARG" ]; then
+        echo "ERROR: Project not found: $PROJECTS_ROOT/$PROJECT_ARG" >&2
         exit 1
     fi
+    set -- "$PROJECT_ARG"
 else
     if [ ! -d "$PROJECTS_ROOT" ] || [ -z "$(ls -A "$PROJECTS_ROOT" 2>/dev/null)" ]; then
         echo "No projects found under $PROJECTS_ROOT"
         exit 0
     fi
-    PROJECTS="$(ls "$PROJECTS_ROOT")"
+    set --
+    for _entry in "$PROJECTS_ROOT"/*; do
+        [ -d "$_entry" ] || continue
+        set -- "$@" "${_entry##*/}"
+    done
 fi
 
 # --- Header ---
@@ -62,7 +70,7 @@ printf "\n${BOLD}%-20s %-32s %-10s %-12s %-14s %-12s${RESET}\n" \
 printf '%0.s─' $(seq 1 105); printf '\n'
 
 # --- Per-project loop ---
-for PROJECT in $PROJECTS; do
+for PROJECT in "$@"; do
     PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
     [ -d "$PROJECT_DIR" ] || continue
 
@@ -117,13 +125,26 @@ for PROJECT in $PROJECTS; do
     elif ! command -v docker >/dev/null 2>&1; then
         CONTAINERS_COL="$(warn 'no docker')"
     else
-        if ! sh "$RESOLVE_HELPER" "$PROJECT_DIR" >/dev/null 2>&1; then
+        # Resolve the compose file list once and pass it to both `ps` calls
+        # below via --file, instead of letting compose-cmd.sh re-run
+        # resolve-compose-files.sh (re-parsing .env) on every invocation.
+        COMPOSE_FILES="$(sh "$RESOLVE_HELPER" "$PROJECT_DIR" 2>/dev/null)" || COMPOSE_FILES=""
+        if [ -z "$COMPOSE_FILES" ]; then
             CONTAINERS_COL="$(warn 'no compose')"
         else
+            set --
+            while IFS= read -r _cf || [ -n "$_cf" ]; do
+                [ -n "$_cf" ] || continue
+                set -- "$@" --file "$_cf"
+            done <<EOF
+$COMPOSE_FILES
+EOF
+            set -- "$@" --
+
             # Use `docker compose ps` against the resolved file list
-            RUNNING="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --status running \
+            RUNNING="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status running \
                            --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
-            STOPPED="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --status exited --status stopped \
+            STOPPED="$(sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status exited --status stopped \
                            --format '{{.Name}}' 2>/dev/null | wc -l | tr -d ' ')"
             TOTAL=$((RUNNING + STOPPED))
 

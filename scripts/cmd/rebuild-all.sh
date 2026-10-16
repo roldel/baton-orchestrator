@@ -122,13 +122,15 @@ if [ ! -d "$PROJECTS_ROOT" ] || [ -z "$(ls -A "$PROJECTS_ROOT" 2>/dev/null)" ]; 
     exit 0
 fi
 
-PROJECTS="$(ls "$PROJECTS_ROOT")"
-
-# --- Filter by mode if requested ---
-TARGETS=""
-for PROJECT in $PROJECTS; do
-    PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
+# By now the argument parser above has consumed every script argument (it
+# shift'd each recognized flag and exits on anything else), so "$@" is free
+# to reuse here. Built via positional params, not a space-joined string: a
+# project directory name containing a space would otherwise be word-split by
+# `for X in $LIST` and silently excluded from the rebuild with no error.
+set --
+for PROJECT_DIR in "$PROJECTS_ROOT"/*; do
     [ -d "$PROJECT_DIR" ] || continue
+    PROJECT="${PROJECT_DIR##*/}"
 
     # Reset .env-sourced var before each iteration to prevent bleed
     STATIC_SITE="no"
@@ -150,18 +152,16 @@ for PROJECT in $PROJECTS; do
         continue
     fi
 
-    TARGETS="$TARGETS $PROJECT"
+    set -- "$@" "$PROJECT"
 done
 
-TARGETS="${TARGETS# }"   # strip leading space
-
-if [ -z "$TARGETS" ]; then
+if [ $# -eq 0 ]; then
     echo "No matching projects found${MODE_FILTER:+ with mode=$MODE_FILTER}."
     exit 0
 fi
 
 # --- Summary ---
-TARGET_COUNT="$(echo "$TARGETS" | wc -w | tr -d ' ')"
+TARGET_COUNT=$#
 echo "======================================================"
 echo " Baton Rebuild-All"
 echo "======================================================"
@@ -174,7 +174,7 @@ else
 fi
 [ "$DRY_RUN" -eq 1 ]  && echo " Dry run   : YES — no changes will be made"
 echo "------------------------------------------------------"
-for PROJECT in $TARGETS; do
+for PROJECT in "$@"; do
     if [ "$ACTIVATE_WEBHOOKS" -eq 1 ]; then
         classify_webhook "$PROJECT"
         case "$WEBHOOK_PLAN" in
@@ -194,6 +194,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 # --- Rebuild loop ---
+# Lists below accumulate as newline-delimited strings, not space-joined: a
+# project name containing a space must stay one entry when the final report
+# below is split back apart (filesystem paths can't contain a newline, so
+# it's a safe separator; a space is not).
+NL='
+'
 SUCCEEDED=""
 FAILED=""
 WEBHOOK_ACTIVATED=""
@@ -201,7 +207,7 @@ WEBHOOK_SKIPPED=""
 WEBHOOK_ALREADY=""
 WEBHOOK_FAILED=""
 
-for PROJECT in $TARGETS; do
+for PROJECT in "$@"; do
     echo ""
     echo "======================================================"
     echo " Rebuilding: $PROJECT"
@@ -209,7 +215,7 @@ for PROJECT in $TARGETS; do
 
     if sh "$CMD_DIR/respawn.sh" "$PROJECT"; then
         echo "[rebuild-all] ✅ $PROJECT — OK"
-        SUCCEEDED="$SUCCEEDED $PROJECT"
+        SUCCEEDED="$SUCCEEDED$PROJECT$NL"
 
         # Classified again after respawn: a snippet that respawn just restored
         # must not be passed to webhook-activate.sh (it errors if the file exists).
@@ -218,69 +224,70 @@ for PROJECT in $TARGETS; do
             case "$WEBHOOK_PLAN" in
                 skip)
                     echo "[rebuild-all] $PROJECT — webhook settings incomplete, skipping activation"
-                    WEBHOOK_SKIPPED="$WEBHOOK_SKIPPED $PROJECT"
+                    WEBHOOK_SKIPPED="$WEBHOOK_SKIPPED$PROJECT$NL"
                     ;;
                 already-active)
                     echo "[rebuild-all] $PROJECT — webhook already active"
-                    WEBHOOK_ALREADY="$WEBHOOK_ALREADY $PROJECT"
+                    WEBHOOK_ALREADY="$WEBHOOK_ALREADY$PROJECT$NL"
                     ;;
                 activate)
                     echo "[rebuild-all] $PROJECT — activating webhook"
                     if sh "$CMD_DIR/webhook-activate.sh" "$PROJECT"; then
                         echo "[rebuild-all] ✅ $PROJECT — webhook activated"
-                        WEBHOOK_ACTIVATED="$WEBHOOK_ACTIVATED $PROJECT"
+                        WEBHOOK_ACTIVATED="$WEBHOOK_ACTIVATED$PROJECT$NL"
                     else
                         echo "[rebuild-all] ❌ $PROJECT — webhook activation FAILED (site rebuild succeeded)"
-                        WEBHOOK_FAILED="$WEBHOOK_FAILED $PROJECT"
+                        WEBHOOK_FAILED="$WEBHOOK_FAILED$PROJECT$NL"
                     fi
                     ;;
             esac
         fi
     else
         echo "[rebuild-all] ❌ $PROJECT — FAILED (continuing with remaining projects)"
-        FAILED="$FAILED $PROJECT"
+        FAILED="$FAILED$PROJECT$NL"
     fi
 done
 
 # --- Final report ---
-SUCCEEDED="${SUCCEEDED# }"
-FAILED="${FAILED# }"
-WEBHOOK_ACTIVATED="${WEBHOOK_ACTIVATED# }"
-WEBHOOK_SKIPPED="${WEBHOOK_SKIPPED# }"
-WEBHOOK_ALREADY="${WEBHOOK_ALREADY# }"
-WEBHOOK_FAILED="${WEBHOOK_FAILED# }"
-
 echo ""
 echo "======================================================"
 echo " Rebuild-All Complete"
 echo "======================================================"
 
+# Splits one of the newline-delimited lists built above back into lines,
+# without touching the script's own IFS/positional state.
+print_list() {
+    printf '%s' "$1" | while IFS= read -r p; do
+        [ -n "$p" ] && echo "    - $p"
+    done
+}
+
 if [ -n "$SUCCEEDED" ]; then
     echo " ✅ Succeeded:"
-    for p in $SUCCEEDED; do echo "    - $p"; done
+    print_list "$SUCCEEDED"
 fi
 
 if [ -n "$FAILED" ]; then
     echo " ❌ Failed:"
-    for p in $FAILED; do echo "    - $p"; done
+    print_list "$FAILED"
 fi
 
 if [ "$ACTIVATE_WEBHOOKS" -eq 1 ]; then
     if [ -n "$WEBHOOK_ACTIVATED" ]; then
         echo " Webhooks activated:"
-        for p in $WEBHOOK_ACTIVATED; do echo "    - $p"; done
+        print_list "$WEBHOOK_ACTIVATED"
     fi
     if [ -n "$WEBHOOK_ALREADY" ]; then
         echo " Webhooks already active:"
-        for p in $WEBHOOK_ALREADY; do echo "    - $p"; done
+        print_list "$WEBHOOK_ALREADY"
     fi
     if [ -n "$WEBHOOK_SKIPPED" ]; then
         echo " Webhooks skipped (settings incomplete):"
-        for p in $WEBHOOK_SKIPPED; do echo "    - $p"; done
+        print_list "$WEBHOOK_SKIPPED"
     fi
     if [ -n "$WEBHOOK_FAILED" ]; then
         echo " ❌ Webhook activation failed (site rebuild succeeded):"
-        for p in $WEBHOOK_FAILED; do echo "    - $p"; done
+        print_list "$WEBHOOK_FAILED"
     fi
 fi
 

@@ -34,8 +34,12 @@ fi
 echo "[webhook-deactivate] Removing $WEBHOOK_CONF"
 
 # Optional: keep a timestamped backup (same pattern as install-server-conf.sh)
+# Restore below uses this exact path, not a glob: a glob matching more than
+# one leftover backup from earlier runs would make `cp` fail (destination
+# treated as a missing directory) and silently no-op under `|| true`.
 mkdir -p "$BASE_DIR/tmp/webhook-backups"
-cp "$WEBHOOK_CONF" "$BASE_DIR/tmp/webhook-backups/${DOMAIN_NAME}-webhook.conf.$(date +%Y%m%d-%H%M%S)"
+BACKUP_FILE="$BASE_DIR/tmp/webhook-backups/${DOMAIN_NAME}-webhook.conf.$(date +%Y%m%d-%H%M%S)"
+cp "$WEBHOOK_CONF" "$BACKUP_FILE"
 
 rm -f "$WEBHOOK_CONF"
 
@@ -43,7 +47,7 @@ rm -f "$WEBHOOK_CONF"
 if ! sh "$TOOLS_DIR/nginx/test-config.sh"; then
     echo "[webhook-deactivate] ERROR: Nginx config broken after removal!" >&2
     echo "[webhook-deactivate] Restoring backup..." >&2
-    cp "$BASE_DIR/tmp/webhook-backups/${DOMAIN_NAME}-webhook.conf."* "$WEBHOOK_CONF" 2>/dev/null || true
+    cp "$BACKUP_FILE" "$WEBHOOK_CONF" 2>/dev/null || true
     exit 1
 fi
 

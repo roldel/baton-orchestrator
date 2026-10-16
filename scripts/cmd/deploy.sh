@@ -72,6 +72,7 @@ echo "[deploy] Rendered server config at: $RENDERED_FILE"
 # container restart: a missing build fails without taking the app down.
 # Read the variable in a subshell so this .env cannot clobber the script.
 STATIC_SOURCE_DIR="$(
+  set +eu
   # shellcheck source=/dev/null
   . "$PROJECT_DIR/.env" >/dev/null 2>&1
   printf '%s' "${STATIC_SOURCE_DIR:-}"

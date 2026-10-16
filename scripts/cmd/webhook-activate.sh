@@ -36,14 +36,13 @@ sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" \
 # WEBHOOK_URL just below. envsubst is explicitly scoped to DOMAIN_NAME and
 # WEBHOOK_URL only (see the envsubst call further down), so those are the
 # only two values this script actually needs out of the project's .env.
+# DOMAIN_NAME specifically is resolved via compute-site-key.sh rather than
+# extracted raw: it's substituted unescaped into the webhook.conf template
+# below AND used to build TARGET_CONF, so without compute-site-key.sh's
+# path-traversal/character validation a project's own .env could redirect
+# TARGET_CONF outside WEBHOOK_DIR or inject nginx directives via envsubst.
 LOAD_ENV_SAFE_SH="$HELPERS_DIR/load-env-safe.sh"
-DOMAIN_NAME="$(
-  set +eu
-  . "$LOAD_ENV_SAFE_SH"
-  if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+DOMAIN_NAME="$(sh "$HELPERS_DIR/compute-site-key.sh" "$PROJECT")"
 WEBHOOK_URL="$(
   set +eu
   . "$LOAD_ENV_SAFE_SH"

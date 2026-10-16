@@ -14,18 +14,12 @@ BASE_DIR="/opt/baton-orchestrator"
 
 [ -f "$ENV_FILE" ] || { echo "Missing .env in $PROJECT_DIR" >&2; exit 1; }
 
-# Read in an isolated subshell via load_env_safe (never sourced directly —
-# see that file's header): BASE_DIR is reused right below to build CONF, and
-# a project's own .env could otherwise redefine it, making this check pass
-# against an attacker-controlled path instead of the real nginx conf dir —
-# this check is used by webhook-activate.sh as a blocking "is it live" gate.
-DOMAIN_NAME="$(
-  set +eu
-  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-  if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+# Resolved via compute-site-key.sh, not extracted raw: DOMAIN_NAME builds
+# CONF below, and this check gates webhook-activate.sh ("is it live"), so
+# without compute-site-key.sh's path-traversal/character validation a
+# project's own .env could make this check pass against an attacker-chosen
+# path instead of the real nginx conf dir.
+DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT" 2>/dev/null)" || DOMAIN_NAME=""
 
 [ -z "${DOMAIN_NAME:-}" ] && { echo "DOMAIN_NAME not set in $ENV_FILE" >&2; exit 1; }
 

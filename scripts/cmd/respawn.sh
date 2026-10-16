@@ -35,19 +35,12 @@ sh "$TOOLS_DIR/projects/validate-content.sh" "$PROJECT"
 RESTORE_WEBHOOK="no"
 
 if [ -f "$PROJECT_DIR/.env" ]; then
-    # Extract DOMAIN_NAME via an isolated subshell using load_env_safe, not
-    # sourced directly (see that file's header): CMD_DIR is reused below
-    # (stand-down.sh/deploy.sh/webhook-activate.sh all get `sh`'d through
-    # it), and a project's own .env sourced directly could redirect those
-    # calls to an attacker-controlled script, on top of being able to
-    # execute arbitrary commands immediately just by being sourced at all.
-    DOMAIN_NAME="$(
-        set +eu
-        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-        if load_env_safe "$PROJECT_DIR/.env"; then
-            printf '%s' "${DOMAIN_NAME:-}"
-        fi
-    )"
+    # Resolved via compute-site-key.sh, not extracted raw: DOMAIN_NAME
+    # builds CURRENT_WEBHOOK_CONF below, so without compute-site-key.sh's
+    # path-traversal/character validation a project's own .env could make
+    # this check (and the "already active" check in Phase 3 below) look at
+    # an attacker-chosen path instead of the real webhook conf.
+    DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT" 2>/dev/null)" || DOMAIN_NAME=""
 
     if [ -n "${DOMAIN_NAME:-}" ]; then
         CURRENT_WEBHOOK_CONF="$WEBHOOK_CONF_DIR/${DOMAIN_NAME}-webhook.conf"

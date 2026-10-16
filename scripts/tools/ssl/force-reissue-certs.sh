@@ -51,13 +51,11 @@ fi
 # directly could redefine either, redirecting those calls to an
 # attacker-controlled script run with this script's privileges — right
 # after the real certificate lineage has already been deleted via certbot.
-DOMAIN_NAME="$(
-  set +eu
-  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-  if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+# DOMAIN_NAME itself is resolved via compute-site-key.sh rather than
+# extracted raw: it builds CERT_DIR below and is passed to `certbot delete`,
+# so without compute-site-key.sh's path-traversal/character validation a
+# crafted DOMAIN_NAME could operate on an arbitrary path/cert-name.
+DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 
 if [ -z "${DOMAIN_NAME:-}" ]; then
   echo "[force-reissue-certs] ERROR: DOMAIN_NAME must be set in .env" >&2

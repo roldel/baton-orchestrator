@@ -94,18 +94,15 @@ classify_webhook() {
         return 0
     fi
 
-    # Read in isolated subshells, not sourced into this shell directly: this
-    # function is called once per project, and a project's .env sourced
+    # This function is called once per project; a project's .env sourced
     # directly could redefine CMD_DIR/WEBHOOKS_DIR/etc. for the REST of this
     # script's run — hijacking which script executes for every other
-    # project. `set +eu` keeps a malformed .env from aborting under set -eu.
-    DOMAIN_NAME="$(
-        set +eu
-        . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-        if load_env_safe "$_env"; then
-            printf '%s' "${DOMAIN_NAME:-}"
-        fi
-    )"
+    # project — so values are read via load_env_safe, never sourced
+    # directly. DOMAIN_NAME specifically is resolved via compute-site-key.sh
+    # rather than extracted raw: it drives the WEBHOOKS_DIR existence check
+    # below, and without compute-site-key.sh's validation a path-traversal
+    # DOMAIN_NAME could make that check look at an arbitrary host path.
+    DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$_project" 2>/dev/null)" || DOMAIN_NAME=""
     WEBHOOK_URL="$(
         set +eu
         . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"

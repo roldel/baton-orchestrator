@@ -41,14 +41,12 @@ fi
 # execute arbitrary commands immediately (e.g. a value containing `;`) and,
 # even if that were somehow survived, redefine ORCHESTRATOR_COMPOSE to point
 # `docker compose -f` at an attacker-authored compose file.
+# DOMAIN_NAME specifically is resolved via compute-site-key.sh rather than
+# extracted raw: it builds CERT_DIR below (and is passed to certbot), so
+# without compute-site-key.sh's path-traversal/character validation a
+# crafted DOMAIN_NAME could point certificate checks at an arbitrary path.
 LOAD_ENV_SAFE_SH="$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-DOMAIN_NAME="$(
-  set +eu
-  . "$LOAD_ENV_SAFE_SH"
-  if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 DOMAIN_ADMIN_EMAIL="$(
   set +eu
   . "$LOAD_ENV_SAFE_SH"

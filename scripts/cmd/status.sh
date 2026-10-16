@@ -95,13 +95,12 @@ for PROJECT in "$@"; do
             fi
         )"
         [ -n "$STATIC_SITE" ] || STATIC_SITE="no"
-        DOMAIN_NAME="$(
-            set +eu
-            . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-            if load_env_safe "$ENV_FILE"; then
-                printf '%s' "${DOMAIN_NAME:-}"
-            fi
-        )"
+        # Resolved via compute-site-key.sh, not extracted raw: DOMAIN_NAME
+        # drives CERT_BASE/NGINX_CONF_DIR/WEBHOOKS_DIR existence checks
+        # below — without compute-site-key.sh's validation, a path-
+        # traversal DOMAIN_NAME could make this report misleading status
+        # for a path outside those directories.
+        DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT" 2>/dev/null)" || DOMAIN_NAME=""
     fi
 
     # --- HOST column ---

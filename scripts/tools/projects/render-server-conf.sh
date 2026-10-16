@@ -60,6 +60,7 @@ _RSC_PROJECT_DIR="$PROJECT_DIR"
 _RSC_ENV_FILE="$ENV_FILE"
 _RSC_TEMPLATE="$TEMPLATE"
 _RSC_TMP_DIR="$TMP_DIR"
+_RSC_PROJECT="$PROJECT"
 
 . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
 load_env_safe "$ENV_FILE"
@@ -69,7 +70,9 @@ PROJECT_DIR="$_RSC_PROJECT_DIR"
 ENV_FILE="$_RSC_ENV_FILE"
 TEMPLATE="$_RSC_TEMPLATE"
 TMP_DIR="$_RSC_TMP_DIR"
-unset _RSC_BASE_DIR _RSC_PROJECT_DIR _RSC_ENV_FILE _RSC_TEMPLATE _RSC_TMP_DIR
+PROJECT="$_RSC_PROJECT"
+export PROJECT
+unset _RSC_BASE_DIR _RSC_PROJECT_DIR _RSC_ENV_FILE _RSC_TEMPLATE _RSC_TMP_DIR _RSC_PROJECT
 
 # --- Normalize comma-separated aliases for Nginx (space-separated is standard) ---
 # Ensure DOMAIN_ALIASES is exported after normalization

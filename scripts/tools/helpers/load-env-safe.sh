@@ -41,11 +41,16 @@
 #   - A line must be exactly `KEY=value`, `KEY="value"` or `KEY='value'`.
 #     KEY must match [A-Z_][A-Z0-9_]*, matching this codebase's own
 #     convention (every real .env key here is UPPER_SNAKE_CASE).
-#   - Quoting is all-or-nothing: a value starting with a quote character
-#     must end with a matching one and must not contain that quote
-#     character again inside it (no backslash-escaping support). A value
-#     that doesn't start with a quote is taken verbatim, including spaces,
-#     up to the end of the line.
+#   - An UNQUOTED value ends at the first unescaped space or tab, exactly
+#     like direct `.`-sourcing would terminate that shell word there — this
+#     also means anything after that whitespace (including a trailing
+#     ` # comment`, which this repo's own .env.sample files use) is simply
+#     not part of the value, matching legacy behavior, not included as data.
+#     A value starting with a quote character runs to the next matching
+#     quote; anything after that closing quote must be empty or whitespace
+#     only (trimmed) — again matching what direct sourcing tolerated.
+#     Quoting is otherwise all-or-nothing: no backslash-escaping support,
+#     and the quote character can't appear again inside the value.
 #   - A line that doesn't parse cleanly, including a comment or blank line
 #     with LEADING WHITESPACE before it, aborts the whole load with a
 #     line-numbered error rather than silently skipping or guessing. This
@@ -90,36 +95,57 @@ load_env_safe() {
 
     case "$_lesf_val" in
       \"*)
-        case "$_lesf_val" in
-          ?*\") _lesf_val="${_lesf_val#\"}"; _lesf_val="${_lesf_val%\"}" ;;
-          \") _lesf_val="" ;;
+        # Strip the leading quote, then split at the FIRST remaining quote:
+        # the content can never itself contain a quote (by construction,
+        # since %% took the earliest one), so only the trailer needs
+        # checking — it must be empty or whitespace-only (trimmed away),
+        # matching direct sourcing's tolerance for trailing space after a
+        # closing quote.
+        _lesf_rest="${_lesf_val#\"}"
+        case "$_lesf_rest" in
+          *\"*)
+            _lesf_content="${_lesf_rest%%\"*}"
+            _lesf_trailer="${_lesf_rest#*\"}"
+            case "$_lesf_trailer" in
+              *[!\ \	]*)
+                echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unexpected content after closing '\"' for $_lesf_key: $_lesf_trailer" >&2
+                return 1
+                ;;
+            esac
+            _lesf_val="$_lesf_content"
+            ;;
           *)
             echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unterminated double-quoted value for $_lesf_key" >&2
             return 1
             ;;
         esac
-        case "$_lesf_val" in
-          *\"*)
-            echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unexpected '\"' inside quoted value for $_lesf_key" >&2
-            return 1
-            ;;
-        esac
         ;;
       \'*)
-        case "$_lesf_val" in
-          ?*\') _lesf_val="${_lesf_val#\'}"; _lesf_val="${_lesf_val%\'}" ;;
-          \') _lesf_val="" ;;
+        _lesf_rest="${_lesf_val#\'}"
+        case "$_lesf_rest" in
+          *\'*)
+            _lesf_content="${_lesf_rest%%\'*}"
+            _lesf_trailer="${_lesf_rest#*\'}"
+            case "$_lesf_trailer" in
+              *[!\ \	]*)
+                echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unexpected content after closing \"'\" for $_lesf_key: $_lesf_trailer" >&2
+                return 1
+                ;;
+            esac
+            _lesf_val="$_lesf_content"
+            ;;
           *)
             echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unterminated single-quoted value for $_lesf_key" >&2
             return 1
             ;;
         esac
-        case "$_lesf_val" in
-          *\'*)
-            echo "[load-env-safe] ERROR: $_lesf_file:$_lesf_lineno: unexpected \"'\" inside quoted value for $_lesf_key" >&2
-            return 1
-            ;;
-        esac
+        ;;
+      *)
+        # Unquoted: ends at the first unescaped space or tab, exactly like
+        # a direct-sourced shell word would — so a trailing ` # comment` or
+        # trailing whitespace is simply not part of the value, same as
+        # direct sourcing, rather than literal data.
+        _lesf_val="${_lesf_val%%[\ \	]*}"
         ;;
     esac
 
@@ -131,5 +157,5 @@ load_env_safe() {
     eval "export $_lesf_key"
   done < "$_lesf_file"
 
-  unset _lesf_file _lesf_lineno _lesf_line _lesf_key _lesf_val _lesf_cr
+  unset _lesf_file _lesf_lineno _lesf_line _lesf_key _lesf_val _lesf_cr _lesf_rest _lesf_content _lesf_trailer
 }

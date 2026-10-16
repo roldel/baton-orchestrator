@@ -39,18 +39,14 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Read in isolated subshells, not sourced into this shell directly: BASE_DIR
-# and TOOLS_DIR are both reused below (to locate webhook-deactivate.sh and
-# the nginx helpers), and a project's own .env sourced directly could
-# redefine either, redirecting those calls to an attacker-controlled script
-# run with this script's (root) privileges.
-DOMAIN_NAME="$(
-  set +eu
-  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-  if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+# DOMAIN_NAME drives the nginx conf path remove_site_conf() moves below, so
+# it's resolved via compute-site-key.sh (not extracted raw) to get its
+# path-traversal/character validation — a project's own .env setting
+# DOMAIN_NAME to something like "../../../../etc/some-file" must not let
+# this script move an arbitrary host file via that path. compute-site-key.sh
+# itself loads .env via load_env_safe, never sourced directly, so BASE_DIR/
+# TOOLS_DIR (reused below) can't be clobbered by the .env either.
+DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")" || DOMAIN_NAME=""
 STATIC_SITE="$(
   set +eu
   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"

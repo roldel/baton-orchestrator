@@ -19,17 +19,13 @@ echo "[webhook-deactivate] Deactivating webhook for project: $PROJECT"
 sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
 sh "$TOOLS_DIR/projects/validate-env.sh"    "$PROJECT" DOMAIN_NAME
 
-# Read in an isolated subshell, not sourced into this shell directly:
-# TOOLS_DIR is reused below (nginx test-config.sh/reload.sh calls), and a
-# project's own .env sourced directly could redefine it, redirecting those
-# calls to an attacker-controlled script run with this script's privileges.
-DOMAIN_NAME="$(
-  set +eu
-  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
-  if load_env_safe "/srv/projects/$PROJECT/.env"; then
-    printf '%s' "${DOMAIN_NAME:-}"
-  fi
-)"
+# DOMAIN_NAME drives WEBHOOK_CONF below, which this script `rm -f`s, so it's
+# resolved via compute-site-key.sh (not extracted raw) for its path-
+# traversal/character validation — a project's own .env setting DOMAIN_NAME
+# to a path-traversal value must not let this script delete an arbitrary
+# host file. compute-site-key.sh loads .env via load_env_safe, never
+# sourced directly, so TOOLS_DIR (reused below) can't be clobbered either.
+DOMAIN_NAME="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")"
 
 WEBHOOK_CONF="/srv/baton-orchestrator/webhooks.d/${DOMAIN_NAME}-webhook.conf"
 

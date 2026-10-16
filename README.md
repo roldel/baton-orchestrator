@@ -227,6 +227,17 @@ server {
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
+    # Reject requests whose Host header doesn't match the SNI hostname this
+    # connection's TLS handshake actually negotiated — stops a request from
+    # landing in a different project's server block (and its proxy_pass /
+    # webhook include) after encrypting with this project's cert. 421 is the
+    # HTTP/2-spec-correct response (RFC 7540 §9.1.2); a compliant client just
+    # retries on a fresh connection, so this is safe even for legitimate
+    # DOMAIN_ALIASES traffic coalesced onto one HTTP/2 connection.
+    if ($host != $ssl_server_name) {
+        return 421;
+    }
+
     # Static files
     location /static/ {
         alias /srv/shared-files/${DOMAIN_NAME}/static/;
@@ -392,6 +403,17 @@ server {
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
 
+    # Reject requests whose Host header doesn't match the SNI hostname this
+    # connection's TLS handshake actually negotiated — stops a request from
+    # landing in a different project's server block (its webhook include /
+    # static root) after encrypting with this project's cert. 421 is the
+    # HTTP/2-spec-correct response (RFC 7540 §9.1.2); a compliant client just
+    # retries on a fresh connection, so this is safe even for legitimate
+    # DOMAIN_ALIASES traffic coalesced onto one HTTP/2 connection.
+    if ($host != $ssl_server_name) {
+        return 421;
+    }
+
     # Webhook location snippet (if present)
     include /etc/nginx/webhooks.d/${DOMAIN_NAME}-*.conf;
 
@@ -445,7 +467,7 @@ Each subdomain project gets its **own** everything: a TLS cert (issued per subdo
 **Worth knowing:**
 - **Rate limits:** Let's Encrypt caps *new* certificates per registered domain at ~50/week. Each new subdomain is a new cert; aliases are SANs on one cert (essentially free). Spinning up dozens of brand-new subdomains in one week can hit the cap — normal use and renewals don't.
 - **Cert persistence:** `ensure-certs.sh` is idempotent and `stand-down.sh` never deletes certs, so redeploying / standing down / respawning a subdomain **reuses** its existing cert — no revalidation, no rate-limit pressure from churn.
-- **Isolation is logical, not physical:** subdomain projects are independent *sites* (routing, TLS, lifecycle) but co-tenant on one host, one ingress, one webhook worker, and the shared `internal_proxy_pass_network` — so they are **not** network-isolated from each other. They also share the parent domain's fate (registrar, rate limit, and public Certificate-Transparency visibility of every subdomain name).
+- **Isolation is logical, not physical:** subdomain projects are independent *sites* (routing, TLS, lifecycle) but co-tenant on one host, one ingress, one webhook worker, and the shared `internal_proxy_pass_network` — so they are **not** network-isolated from each other. They also share the parent domain's fate (registrar, rate limit, and public Certificate-Transparency visibility of every subdomain name). Each `server.conf` template's `if ($host != $ssl_server_name) { return 421; }` guard keeps a request from being decrypted with one project's certificate and then served by a different project's `server` block — add it to any custom `server.conf` that doesn't start from the shipped templates.
 
 ### Static sync mechanics
 

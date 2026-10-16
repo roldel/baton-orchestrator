@@ -94,6 +94,16 @@ for _alias in $DOMAIN_ALIASES; do
   esac
 done
 
+# WEBHOOK_URL is also in VARS_TO_SUBSTITUTE below (a server.conf template may
+# reference it), so it too is substituted unescaped via envsubst — same
+# nginx-injection concern as DOMAIN_ALIASES above. webhook-activate.sh already
+# runs it through this same check before using it in webhook.conf; validate
+# it here too, so this path isn't the odd one out. Optional: only set when a
+# project actually uses the webhook feature.
+if [ -n "${WEBHOOK_URL:-}" ]; then
+  sh "$BASE_DIR/scripts/tools/helpers/validate-webhook-url.sh" "$WEBHOOK_URL"
+fi
+
 # --- Static-site flag + SITE_KEY (SITE_KEY = $DOMAIN_NAME, namespaces the
 # conf.d filename and shared-files dir per project) ---
 STATIC_SITE="${STATIC_SITE:-no}"

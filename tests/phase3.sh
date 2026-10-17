@@ -165,6 +165,36 @@ phase3() {
   done
   ok "phase3: flock releases on SIGKILL"
 
+  # BusyBox flock has no -o. The fallback keeps the lock on fd 9 in this process.
+  _p3_bb="$_p3/bb-hold.sh"
+  cat > "$_p3_bb" <<EOF
+#!/bin/sh
+. "$ROOT/scripts/tools/webhook/lock-lib.sh"
+export BATON_FLOCK_IMPL=busybox
+export BATON_LOCK_FILE="$_p3/bb.lock"
+baton_hold_webhook_lock
+echo held
+exec sleep 30
+EOF
+  chmod 755 "$_p3_bb"
+  "$_p3_bb" > "$_p3/bb.held" &
+  _p3_bbpid=$!
+  _p3_i=0
+  while [ ! -s "$_p3/bb.held" ] && [ "$_p3_i" -lt 50 ]; do
+    sleep 0.1
+    _p3_i=$((_p3_i + 1))
+  done
+  if flock -n "$_p3/bb.lock" true; then
+    kill -9 "$_p3_bbpid" 2>/dev/null || true
+    fail "phase3: busybox lock path did not hold the lock"
+  fi
+  kill -9 "$_p3_bbpid" 2>/dev/null || true
+  wait "$_p3_bbpid" 2>/dev/null || true
+  if ! flock -w 2 "$_p3/bb.lock" true; then
+    fail "phase3: busybox lock path did not release after SIGKILL"
+  fi
+  ok "phase3: busybox flock path"
+
   if ! grep -q '65532' "$ROOT/orchestrator/webhook/Dockerfile"; then
     fail "phase3: image is not uid 65532"
   fi

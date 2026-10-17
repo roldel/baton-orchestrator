@@ -252,15 +252,14 @@ phase9() {
   if grep -q '\[compose-cmd\]' "$_p9/status-ok.out" "$_p9/status-ok.err"; then
     fail "phase9: compose-cmd banner leaked into status"
   fi
-  if ! awk '
-    /webapp/ && !row { row = NR }
-    /compose:/ && !note { note = NR }
-    END { exit !(row && note && note > row) }
-  ' "$_p9/status-ok.out"; then
+  if grep -q 'compose:' "$_p9/status-ok.out"; then
     cat "$_p9/status-ok.out" >&2
-    fail "phase9: compose files are not listed after the project row"
+    fail "phase9: status printed a compose file line"
   fi
-  ok "phase9: status lists compose files under the project"
+  if ! grep -q 'webapp' "$_p9/status-ok.out"; then
+    fail "phase9: status did not print the project row"
+  fi
+  ok "phase9: status table has no compose file line"
 
   phase9_stub "$_p9/compose-fail" \
     'echo "[compose-cmd] dir=boom files: x" >&2' \
@@ -282,6 +281,11 @@ phase9() {
   ' "$_p9/status-bad.out"; then
     cat "$_p9/status-bad.out" >&2
     fail "phase9: compose-cmd error was not printed after the project row"
+  fi
+  _p9_banners=$(grep -c '\[compose-cmd\]' "$_p9/status-bad.out" || true)
+  if [ "$_p9_banners" -ne 1 ]; then
+    cat "$_p9/status-bad.out" >&2
+    fail "phase9: compose error was printed ${_p9_banners:-0} times"
   fi
   ok "phase9: status shows compose errors under the project"
 

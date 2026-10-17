@@ -8,7 +8,6 @@
 #   - Site live    (SSL cert present + nginx config installed)
 #   - Containers   (dynamic only: running / stopped / absent)
 #   - Webhook      (active / inactive)
-# A dynamic project then prints one "compose:" line with its compose files.
 #
 # Usage:
 #   ./scripts/cmd/status.sh              # all projects
@@ -87,7 +86,6 @@ for PROJECT in "$@"; do
     PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
     [ -d "$PROJECT_DIR" ] || continue
 
-    COMPOSE_NOTE=""
     _st_ps=0
     _st_run=""
     _st_stop=""
@@ -157,19 +155,6 @@ for PROJECT in "$@"; do
         if [ -z "$COMPOSE_FILES" ]; then
             CONTAINERS_COL="$(warn 'no compose')"
         else
-            _note=""
-            while IFS= read -r _cf || [ -n "$_cf" ]; do
-                [ -n "$_cf" ] || continue
-                if [ -n "$_note" ]; then
-                    _note="$_note $_cf"
-                else
-                    _note=$_cf
-                fi
-            done <<EOF
-$COMPOSE_FILES
-EOF
-            COMPOSE_NOTE=$_note
-
             set --
             while IFS= read -r _cf || [ -n "$_cf" ]; do
                 [ -n "$_cf" ] || continue
@@ -179,19 +164,17 @@ $COMPOSE_FILES
 EOF
             set -- "$@" --
 
-            # A failed ps is not an empty project. compose-cmd's own stderr
-            # (the dir/files banner) stays out of the table; on failure it
-            # is printed under the row.
+            # A failed ps is not an empty project. Its message is printed
+            # once, under the row. A successful ps adds nothing under the row.
             _st_run=$(mktemp)
             _st_stop=$(mktemp)
             _st_err=$(mktemp)
             _st_ps=0
             if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status running \
-                    --format '{{.Name}}' >"$_st_run" 2>>"$_st_err"; then
+                    --format '{{.Name}}' >"$_st_run" 2>"$_st_err"; then
                 _st_ps=1
-            fi
-            if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status exited --status stopped \
-                    --format '{{.Name}}' >"$_st_stop" 2>>"$_st_err"; then
+            elif ! sh "$COMPOSE_CMD" "$PROJECT_DIR" "$@" ps --status exited --status stopped \
+                    --format '{{.Name}}' >"$_st_stop" 2>"$_st_err"; then
                 _st_ps=1
             fi
             if [ "$_st_ps" -ne 0 ]; then
@@ -231,9 +214,6 @@ EOF
         "$SITE_COL" "" \
         "$CONTAINERS_COL" "" \
         "$WEBHOOK_COL"
-    if [ -n "$COMPOSE_NOTE" ]; then
-        printf '    compose: %s\n' "$COMPOSE_NOTE"
-    fi
     if [ "$_st_ps" -ne 0 ] && [ -n "$_st_err" ] && [ -s "$_st_err" ]; then
         cat "$_st_err"
     fi

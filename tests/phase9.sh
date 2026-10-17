@@ -102,6 +102,55 @@ phase9() {
     'services:' \
     '  web:' \
     '    volumes:' \
+    '      - type: bind' \
+    '        source: /srv/shared-files/app.example/static' \
+    '        target: /static_files' \
+    '      - /srv/shared-files/app.example/media:/media:rw' \
+    > "$_p9/compose-shared.yml"
+  baton_compose_config_allowed "$_p9/compose-shared.yml" "$_p9/proj" \
+    /srv/shared-files/app.example \
+    || fail "phase9: shared-files bind was rejected"
+  printf '%s\n' \
+    'services:' \
+    '  web:' \
+    '    volumes:' \
+    '      - type: bind' \
+    '        source: /srv/shared-files/other.example/static' \
+    '        target: /static_files' \
+    > "$_p9/compose-shared-other.yml"
+  if baton_compose_config_allowed "$_p9/compose-shared-other.yml" "$_p9/proj" \
+      /srv/shared-files/app.example; then
+    fail "phase9: another site's shared-files bind was accepted"
+  fi
+  printf '%s\n' \
+    'services:' \
+    '  web:' \
+    '    volumes:' \
+    '      - type: bind' \
+    '        source: /srv/shared-files/app.example-evil/static' \
+    '        target: /static_files' \
+    > "$_p9/compose-shared-prefix.yml"
+  if baton_compose_config_allowed "$_p9/compose-shared-prefix.yml" "$_p9/proj" \
+      /srv/shared-files/app.example; then
+    fail "phase9: shared-files prefix bind was accepted"
+  fi
+  mkdir -p "$_p9/siteproj"
+  printf '%s\n' 'DOMAIN_NAME=app.example' > "$_p9/siteproj/.env"
+  _p9_shared=$(baton_compose_shared_dir "$_p9/siteproj" \
+    "$ROOT/scripts/tools/helpers") || _p9_shared=""
+  if [ "$_p9_shared" != /srv/shared-files/app.example ]; then
+    fail "phase9: shared dir resolved to '${_p9_shared:-}'"
+  fi
+  printf '%s\n' 'DOMAIN_NAME=../etc' > "$_p9/siteproj/.env"
+  _p9_shared=$(baton_compose_shared_dir "$_p9/siteproj" \
+    "$ROOT/scripts/tools/helpers") || _p9_shared=""
+  if [ -n "$_p9_shared" ]; then
+    fail "phase9: unsafe DOMAIN_NAME resolved a shared dir"
+  fi
+  printf '%s\n' \
+    'services:' \
+    '  web:' \
+    '    volumes:' \
     '      - /var/run/docker.sock:/var/run/docker.sock' \
     > "$_p9/compose-sock.yml"
   if baton_compose_config_allowed "$_p9/compose-sock.yml" "$_p9/proj"; then
@@ -253,6 +302,9 @@ phase9() {
   done
   if ! grep -q 'baton_compose_config_allowed' "$ROOT/scripts/tools/helpers/compose-cmd.sh"; then
     fail "phase9: compose-cmd does not scan the compose config"
+  fi
+  if ! grep -q 'baton_compose_shared_dir' "$ROOT/scripts/tools/helpers/compose-cmd.sh"; then
+    fail "phase9: compose-cmd does not allow the project shared-files directory"
   fi
   if ! grep -q 'baton_check_rendered_conf' "$ROOT/scripts/tools/projects/install-server-conf.sh"; then
     fail "phase9: install-server-conf does not scan the rendered file"

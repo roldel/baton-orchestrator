@@ -68,7 +68,8 @@ baton_cg_under() {
   return 1
 }
 
-# Absolute binds must stay inside the project directory. Relative paths and
+# Absolute binds must stay inside the project directory, or inside the
+# project's shared-files directory when one was passed. Relative paths and
 # named volumes are left alone. Any ".." segment is rejected.
 baton_cg_bind_ok() {
   _cgb=$1
@@ -81,6 +82,9 @@ baton_cg_bind_ok() {
       if baton_cg_under "$_cgb" "$_cca_log" || baton_cg_under "$_cgb" "$_cca_phys"; then
         return 0
       fi
+      if [ -n "${_cca_shared:-}" ] && baton_cg_under "$_cgb" "$_cca_shared"; then
+        return 0
+      fi
       echo "[compose-guard] ERROR: bind source is outside the project directory: $_cgb" >&2
       return 1
       ;;
@@ -88,10 +92,44 @@ baton_cg_bind_ok() {
   return 0
 }
 
-# baton_compose_config_allowed FILE PROJECT_DIR
+# Print <shared-files>/<DOMAIN_NAME>, or nothing when DOMAIN_NAME is missing
+# or is not one path segment. $1 is the project directory. $2 is the helpers
+# directory that contains load-env-safe.sh.
+baton_compose_shared_dir() {
+  _csd_dir=$1
+  _csd_helpers=$2
+  [ -f "$_csd_dir/.env" ] || return 0
+  [ -f "$_csd_helpers/load-env-safe.sh" ] || return 0
+  _csd_domain=$(
+    set +e
+    . "$_csd_helpers/load-env-safe.sh"
+    if load_env_safe "$_csd_dir/.env"; then
+      printf '%s' "${DOMAIN_NAME:-}"
+    fi
+  ) || _csd_domain=""
+  case $_csd_domain in
+    ''|'.'|'..') return 0 ;;
+    *[!A-Za-z0-9.-]*) return 0 ;;
+  esac
+  _csd_root=${BATON_SHARED_FILES_ROOT:-/srv/shared-files}
+  while :; do
+    case $_csd_root in
+      */)
+        [ "$_csd_root" = / ] && break
+        _csd_root=${_csd_root%/}
+        ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$_csd_root/$_csd_domain"
+}
+
+# baton_compose_config_allowed FILE PROJECT_DIR [SHARED_DIR]
+# SHARED_DIR is this project's /srv/shared-files/<DOMAIN_NAME>.
 baton_compose_config_allowed() {
   _cca_file=$1
   _cca_dir=$2
+  _cca_shared=${3:-}
   if [ ! -f "$_cca_file" ]; then
     echo "[compose-guard] ERROR: not a file: $_cca_file" >&2
     return 1

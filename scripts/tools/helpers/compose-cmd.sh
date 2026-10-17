@@ -135,7 +135,9 @@ EOF
   echo "[compose-cmd] ERROR: docker compose config failed for $PROJECT_DIR" >&2
   exit 1
 fi
-if ! baton_compose_config_allowed "$_cfg" "$PROJECT_DIR"; then
+# Shared files live beside the project, at /srv/shared-files/<DOMAIN_NAME>.
+_cg_shared=$(baton_compose_shared_dir "$PROJECT_DIR" "$SCRIPT_DIR") || _cg_shared=""
+if ! baton_compose_config_allowed "$_cfg" "$PROJECT_DIR" "$_cg_shared"; then
   rm -f "$_cfg"
   exit 1
 fi

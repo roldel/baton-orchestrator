@@ -37,6 +37,7 @@ PROJECT_DIR="$(cd "$LOOKUP_PATH" && pwd)"
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 RESOLVE="$SCRIPT_DIR/resolve-compose-files.sh"
+. "$SCRIPT_DIR/compose-guard.sh"
 
 if [ ! -f "$RESOLVE" ]; then
   echo "[compose-cmd] ERROR: resolve-compose-files helper not found: $RESOLVE" >&2
@@ -115,6 +116,30 @@ while [ "$_i" -le "$_carg_count" ]; do
   eval "set -- \"\$@\" \"\$_carg_$_i\""
   _i=$((_i + 1))
 done
+
+# config must succeed, and the rendered file must pass the host-escape scan,
+# before compose runs. config stdout stays off this command's stdout.
+_cfg=$(mktemp)
+if ! (
+  cd "$PROJECT_DIR" || exit 1
+  set --
+  while IFS= read -r _cf || [ -n "$_cf" ]; do
+    [ -n "$_cf" ] || continue
+    set -- "$@" -f "$_cf"
+  done <<EOF
+$FILE_LIST
+EOF
+  docker compose "$@" config
+) >"$_cfg"; then
+  rm -f "$_cfg"
+  echo "[compose-cmd] ERROR: docker compose config failed for $PROJECT_DIR" >&2
+  exit 1
+fi
+if ! baton_compose_config_allowed "$_cfg" "$PROJECT_DIR"; then
+  rm -f "$_cfg"
+  exit 1
+fi
+rm -f "$_cfg"
 
 echo "[compose-cmd] dir=$PROJECT_DIR files:$_files_log" >&2
 

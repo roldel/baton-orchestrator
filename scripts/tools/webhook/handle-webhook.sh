@@ -15,27 +15,14 @@ BATON_SCRIPTS_ROOT="${BATON_SCRIPTS_ROOT:-/srv/scripts}"
 
 . "$BASE_DIR/scripts/tools/webhook/task-lib.sh"
 . "$BASE_DIR/scripts/tools/static/publish-lib.sh"
+. "$BASE_DIR/scripts/tools/webhook/lock-lib.sh"
 
 log() {
     printf '%s - %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" | tee -a "$LOG"
 }
 
-# flock(1) is the lock holder. It exits when this script exits, and the kernel
-# drops the lock if flock itself is killed (SIGKILL included). A directory
-# lock left behind by a killed worker wedged every later task.
-if [ "${BATON_LOCK_HELD:-}" != 1 ]; then
-    if [ -n "${BATON_LOCK_FILE:-}" ]; then
-        _lock=$BATON_LOCK_FILE
-    elif [ -w /run ] 2>/dev/null; then
-        _lock=/run/baton-webhook.lock
-    else
-        _lock=/tmp/baton-webhook.lock
-    fi
-    export BATON_LOCK_HELD=1
-    # -o closes the lock fd in the child so a killed flock parent releases
-    # the lock even if git or compose is still running.
-    exec flock -o -w 60 "$_lock" "$0" "$@"
-fi
+# One flock covers this worker and stand-down, deploy, and respawn.
+baton_hold_webhook_lock "$@"
 
 cleanup() {
     if [ -n "${BACKUP:-}" ] && [ -d "$BACKUP" ]; then
@@ -93,7 +80,7 @@ fi
 # --- Custom script ---
 if [ -n "${CUSTOM_REDEPLOY_SCRIPT_LOCATION:-}" ]; then
     log "Running custom script: $CUSTOM_REDEPLOY_SCRIPT_LOCATION"
-    if sh "$CUSTOM_REDEPLOY_SCRIPT_LOCATION" >>"$LOG" 2>&1; then
+    if baton_run_as_webhook_user "$CUSTOM_REDEPLOY_SCRIPT_LOCATION" "$REPO_LOCATION" >>"$LOG" 2>&1; then
         log "Custom OK"
         mv "$TASK_FILE" "$PROCESSED_DIR/$(basename "$TASK_FILE").$(date +%s)" 2>/dev/null || true
         exit 0
@@ -136,7 +123,7 @@ fi
 # --- CI pipeline ---
 if [ -n "${CI_PIPELINE_LOCATION:-}" ]; then
     log "Running CI: $CI_PIPELINE_LOCATION"
-    if sh "$CI_PIPELINE_LOCATION" >>"$LOG" 2>&1; then
+    if baton_run_as_webhook_user "$CI_PIPELINE_LOCATION" "$REPO_LOCATION" >>"$LOG" 2>&1; then
         log "CI OK"
     else
         log "CI FAILED → restoring"

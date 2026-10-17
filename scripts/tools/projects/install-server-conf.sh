@@ -44,6 +44,39 @@ if [ ! -f "$SRC" ]; then
   exit 1
 fi
 
+# The rendered file is about to join the shared ingress. Reject it before copy.
+DOMAIN_ALIASES="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOMAIN_ALIASES:-}"
+  fi
+)"
+UPSTREAM="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${DOCKER_NETWORK_SERVICE_ALIAS:-}"
+  fi
+)"
+APP_PORT="$(
+  set +eu
+  . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+  if load_env_safe "$ENV_FILE"; then
+    printf '%s' "${APP_PORT:-}"
+  fi
+)"
+. "$BASE_DIR/scripts/tools/helpers/check-domain-aliases.sh"
+if ! DOMAIN_ALIASES="$(baton_normalize_domain_aliases "$DOMAIN_ALIASES")"; then
+  echo "[install-server-conf] ERROR: DOMAIN_ALIASES rejected" >&2
+  exit 1
+fi
+. "$BASE_DIR/scripts/tools/helpers/nginx-conf-allow.sh"
+if ! baton_check_rendered_conf "$SRC" "$SITE_KEY" "$DOMAIN_ALIASES" "$SITE_KEY" "$UPSTREAM" "$APP_PORT"; then
+  echo "[install-server-conf] ERROR: rendered server config rejected" >&2
+  exit 1
+fi
+
 mkdir -p "$NGINX_CONF_DIR"
 mkdir -p "$BACKUP_DIR"
 

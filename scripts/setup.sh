@@ -54,6 +54,9 @@ mkdir -p \
 chmod 0700 "/srv/webhooks/queue"
 chown 65532:65532 "/srv/webhooks/queue"
 
+# The webhook container (uid 65532) reads project .env files.
+sh "$BASE_DIR/scripts/tools/projects/grant-webhook-read.sh" /srv/projects
+
 
 # --- Script permissions ---
 # Ensure all shell scripts under scripts/ are executable.
@@ -102,7 +105,7 @@ if [ -f "$ORCHESTRATOR_COMPOSE" ]; then
   echo "Stopping any existing orchestrator services (clean state)..."
   docker compose -f "$ORCHESTRATOR_COMPOSE" down --remove-orphans || true
   echo "Starting nginx and webhook..."
-  docker compose -f "$ORCHESTRATOR_COMPOSE" up -d nginx webhook
+  docker compose -f "$ORCHESTRATOR_COMPOSE" up -d --build nginx webhook
 else
   echo "ERROR: Missing $ORCHESTRATOR_COMPOSE" >&2
   exit 1

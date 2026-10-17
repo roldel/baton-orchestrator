@@ -169,7 +169,8 @@ WEBHOOK_URL=/webhook # If webhook set on https://example.com/mywebhookurl our WE
 PAYLOAD_SIGNATURE=supersecret-shared-with-github
 
 # Optional
-# Unset uses /srv/projects/<project-name>. A checkout under /srv/repos is also allowed.
+# Unset uses /srv/projects/<project-name>. Or set /srv/repos/<project-name>
+# (a directory under that checkout is allowed).
 # REPO_LOCATION=/srv/repos/<project-name>
 DOCKER_COMPOSE_RESTART_REQUIRED=NO # Auto rebuild and restart docker compose cluster upon redeploy
 TARGET_BRANCH=main
@@ -359,7 +360,8 @@ DOMAIN_ALIASES=www.example.com
 WEBHOOK_URL=/webhook
 PAYLOAD_SIGNATURE=supersecret-shared-with-github
 
-# Unset uses /srv/projects/<project-name>. A checkout under /srv/repos is also allowed.
+# Unset uses /srv/projects/<project-name>. Or set /srv/repos/<project-name>
+# (a directory under that checkout is allowed).
 # REPO_LOCATION=/srv/repos/<project-name>
 TARGET_BRANCH=main
 
@@ -474,6 +476,8 @@ Both paths — dynamic and static — support **push-to-deploy**. Activate it pe
 
 **Queue (no dropped concurrent webhooks):** the Flask webhook container only writes an atomic `task_*.baton` file under `/srv/webhooks/queue/` (unique name: timestamp + pid + short uuid + project). A single host-side worker (`baton-webhook` / `watch-webhook.sh`) claims tasks one at a time (`queue/` → `processing/`), runs `handle-webhook.sh`, and archives results under `processed/` (or `failed/` if a task is left stranded). Waiting uses inotify plus a timed re-scan so a race can never leave work unprocessed. On worker restart, anything left in `processing/` is reclaimed back into the queue; leftover files under the legacy `signals/` path are migrated the same way. If several tasks for the **same project** pile up, the worker **coalesces** them: only the newest is run; older duplicates are archived as `*.coalesced.<ts>` under `processed/`.
 
+The webhook container runs as uid 65532 and reads each project's `.env`. `setup`, the webhook service, and `deploy` grant group 65532 traverse on directories under `/srv/projects` and group read on regular `.env` files. CI and custom redeploy scripts run as that same user.
+
 ---
 
 ## 🧰 Commands Summary
@@ -486,7 +490,7 @@ Both paths — dynamic and static — support **push-to-deploy**. Activate it pe
 | `./scripts/cmd/deploy.sh <project> [--webhook]` | Deploy or update project; `--webhook` also activates its webhook afterward |
 | `./scripts/cmd/stand-down.sh <project>` | Disable project (keeps SSL) |
 | `./scripts/cmd/respawn.sh <project>` | Full reset: stand down, redeploy, restore webhook if it was active |
-| `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs the webhook route on each project whose `.env` already sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose snippet is already installed or whose webhook settings are incomplete |
+| `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs or refreshes the webhook route on each project whose `.env` sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose webhook settings are incomplete |
 | `./scripts/cmd/status.sh [project]` | Overview of all projects (host, mode, site, containers, webhook), or a single project. Host is `DOMAIN_NAME` |
 | `./scripts/cmd/remove-project.sh <project> [--delete-files]` | Remove a project from Baton management; keeps SSL cert and shared files unless `--delete-files` is passed |
 | `./scripts/cmd/webhook-activate.sh <project>` | Add and connect webhook endpoint and redeploy scripts |

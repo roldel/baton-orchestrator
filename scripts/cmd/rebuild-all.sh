@@ -207,7 +207,7 @@ for PROJECT in "$@"; do
         classify_webhook "$PROJECT"
         case "$WEBHOOK_PLAN" in
             activate)       echo "   - $PROJECT  (webhook: activate)" ;;
-            already-active) echo "   - $PROJECT  (webhook: already active)" ;;
+            already-active) echo "   - $PROJECT  (webhook: refresh)" ;;
             *)              echo "   - $PROJECT  (webhook: skip, settings incomplete)" ;;
         esac
     else
@@ -245,8 +245,8 @@ for PROJECT in "$@"; do
         echo "[rebuild-all] ✅ $PROJECT — OK"
         SUCCEEDED="$SUCCEEDED$PROJECT$NL"
 
-        # Classified again after respawn: a snippet that respawn just restored
-        # must not be passed to webhook-activate.sh (it errors if the file exists).
+        # webhook-activate installs a missing snippet and refreshes one that
+        # is already on disk when the template differs.
         if [ "$ACTIVATE_WEBHOOKS" -eq 1 ]; then
             classify_webhook "$PROJECT"
             case "$WEBHOOK_PLAN" in
@@ -254,12 +254,12 @@ for PROJECT in "$@"; do
                     echo "[rebuild-all] $PROJECT — webhook settings incomplete, skipping activation"
                     WEBHOOK_SKIPPED="$WEBHOOK_SKIPPED$PROJECT$NL"
                     ;;
-                already-active)
-                    echo "[rebuild-all] $PROJECT — webhook already active"
-                    WEBHOOK_ALREADY="$WEBHOOK_ALREADY$PROJECT$NL"
-                    ;;
-                activate)
-                    echo "[rebuild-all] $PROJECT — activating webhook"
+                already-active|activate)
+                    if [ "$WEBHOOK_PLAN" = already-active ]; then
+                        echo "[rebuild-all] $PROJECT — refreshing webhook"
+                    else
+                        echo "[rebuild-all] $PROJECT — activating webhook"
+                    fi
                     if sh "$CMD_DIR/webhook-activate.sh" "$PROJECT"; then
                         echo "[rebuild-all] ✅ $PROJECT — webhook activated"
                         WEBHOOK_ACTIVATED="$WEBHOOK_ACTIVATED$PROJECT$NL"

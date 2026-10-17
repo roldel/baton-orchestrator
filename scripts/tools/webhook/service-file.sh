@@ -29,6 +29,7 @@ start_pre() {
     # needs a passwd entry the host does not have for uid 65532.
     checkpath --directory --mode 0700 /srv/webhooks/queue
     chown 65532:65532 /srv/webhooks/queue
+    sh /opt/baton-orchestrator/scripts/tools/projects/grant-webhook-read.sh /srv/projects
     checkpath --directory --mode 0755 /srv/webhooks/processing
     checkpath --directory --mode 0755 /srv/webhooks/processed
     checkpath --directory --mode 0755 /srv/webhooks/failed

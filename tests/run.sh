@@ -26,6 +26,7 @@ ok() {
 . "$ROOT/tests/phase6.sh"
 . "$ROOT/tests/phase7.sh"
 . "$ROOT/tests/phase8.sh"
+. "$ROOT/tests/phase9.sh"
 
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS test(s) failed" >&2

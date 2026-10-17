@@ -1,6 +1,8 @@
 #!/bin/sh
 # Stand down a project:
-# - Cancel queued webhook tasks, or stop if one is already running
+# - Cancel queued webhook tasks. A task already in processing/ stops stand-down.
+#   After the vhost is removed, a processing task for this project is cancelled
+#   while the webhook lock is still held.
 # - Stop its containers
 # - Remove its nginx server config
 # - Test nginx config and reload, restoring the vhost if that fails
@@ -15,6 +17,9 @@ fi
 PROJECT="$1"
 
 BASE_DIR="${BATON_BASE_DIR:-/opt/baton-orchestrator}"
+. "$BASE_DIR/scripts/tools/webhook/lock-lib.sh"
+baton_hold_webhook_lock "$@"
+
 PROJECTS_ROOT="${BATON_PROJECTS_ROOT:-/srv/projects}"
 PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
 TOOLS_DIR="$BASE_DIR/scripts/tools"
@@ -74,32 +79,40 @@ else
     exit 1
   fi
 
+  _sd_down=1
   if [ -f "$RESOLVE_HELPER" ]; then
-    COMPOSE_FILES="$(sh "$RESOLVE_HELPER" "$PROJECT_DIR")"
-    echo "[stand-down] Using compose file(s):"
-    printf '%s\n' "$COMPOSE_FILES" | while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      echo "[stand-down]   - $f"
-    done
+    COMPOSE_FILES="$(sh "$RESOLVE_HELPER" "$PROJECT_DIR" 2>/dev/null)" || COMPOSE_FILES=""
+    if [ -z "$COMPOSE_FILES" ]; then
+      echo "[stand-down] WARNING: no compose file resolved for $PROJECT_DIR; skipping compose down" >&2
+      _sd_down=0
+    else
+      echo "[stand-down] Using compose file(s):"
+      printf '%s\n' "$COMPOSE_FILES" | while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        echo "[stand-down]   - $f"
+      done
+    fi
   fi
 
-  echo "[stand-down] docker compose down"
-  if sh "$COMPOSE_CMD" "$PROJECT_DIR" down; then
-    CONTAINERS_STOPPED=1
-  else
-    _sd_ps=$(mktemp)
-    if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --format '{{.Name}}' > "$_sd_ps"; then
+  if [ "$_sd_down" -eq 1 ]; then
+    echo "[stand-down] docker compose down"
+    if sh "$COMPOSE_CMD" "$PROJECT_DIR" down; then
+      CONTAINERS_STOPPED=1
+    else
+      _sd_ps=$(mktemp)
+      if ! sh "$COMPOSE_CMD" "$PROJECT_DIR" ps --format '{{.Name}}' > "$_sd_ps"; then
+        rm -f "$_sd_ps"
+        echo "[stand-down] ERROR: docker compose down failed and compose ps failed" >&2
+        exit 1
+      fi
+      if [ -s "$_sd_ps" ]; then
+        rm -f "$_sd_ps"
+        echo "[stand-down] ERROR: docker compose down failed and containers are still running" >&2
+        exit 1
+      fi
       rm -f "$_sd_ps"
-      echo "[stand-down] ERROR: docker compose down failed and compose ps failed" >&2
-      exit 1
+      echo "[stand-down] docker compose down failed, but nothing is running" >&2
     fi
-    if [ -s "$_sd_ps" ]; then
-      rm -f "$_sd_ps"
-      echo "[stand-down] ERROR: docker compose down failed and containers are still running" >&2
-      exit 1
-    fi
-    rm -f "$_sd_ps"
-    echo "[stand-down] docker compose down failed, but nothing is running" >&2
   fi
 fi
 
@@ -137,6 +150,13 @@ fi
 if ! sh "$NGINX_RELOAD"; then
   echo "[stand-down] ERROR: nginx reload failed" >&2
   restore_conf
+  exit 1
+fi
+
+# The opening quiesce refused a task already in processing/. One claimed
+# after that scan is cancelled here, while this process still holds the lock.
+if ! BATON_QUIESCE_CANCEL_PROCESSING=1 sh "$QUIESCE" "$PROJECT"; then
+  echo "[stand-down] ERROR: could not cancel webhook tasks still in processing for $PROJECT" >&2
   exit 1
 fi
 

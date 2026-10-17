@@ -18,6 +18,8 @@ ACTIVATE_WEBHOOK=0
 [ "${2:-}" = "--webhook" ] && ACTIVATE_WEBHOOK=1
 
 BASE_DIR="/opt/baton-orchestrator"
+. "$BASE_DIR/scripts/tools/webhook/lock-lib.sh"
+baton_hold_webhook_lock "$@"
 
 PROJECT_DIR="/srv/projects/$PROJECT"
 
@@ -33,6 +35,9 @@ echo "[deploy] Starting deploy for project: $PROJECT"
 
 # 1) Project structure validation
 sh "$TOOLS_DIR/projects/validate-exists.sh" "$PROJECT"
+
+# The webhook container (uid 65532) reads this project's .env.
+sh "$TOOLS_DIR/projects/grant-webhook-read.sh" "$PROJECT_DIR"
 
 # 2) Project content validation
 sh "$TOOLS_DIR/projects/validate-content.sh" "$PROJECT"

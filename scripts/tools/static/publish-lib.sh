@@ -98,8 +98,14 @@ baton_atomic_symlink() {
   _bas_target=$1
   _bas_dest=$2
   _bas_tmp=${_bas_dest}.tmp.$$
-  ln -s "$_bas_target" "$_bas_tmp"
-  mv -f "$_bas_tmp" "$_bas_dest"
+  ln -s "$_bas_target" "$_bas_tmp" || return 1
+  # Treat the destination as a path to replace, even when it links to a directory.
+  mv -Tf "$_bas_tmp" "$_bas_dest" || return 1
+  _bas_actual=$(readlink -- "$_bas_dest") || return 1
+  if [ "$_bas_actual" != "$_bas_target" ]; then
+    echo "[sync-static-site] ERROR: live symlink $_bas_dest points to $_bas_actual instead of $_bas_target" >&2
+    return 1
+  fi
 }
 
 # Delete .staging-<timestamp>-* directories older than one day.

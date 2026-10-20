@@ -54,13 +54,19 @@ phase7() {
   fi
   ok "phase7: staging sweep keeps a fresh dir and the live target"
 
+  mkdir -p "$_p7/releases/old" "$_p7/releases/new"
   ln -s "$_p7/releases/old" "$_p7/releases/site"
   baton_atomic_symlink "$_p7/releases/new" "$_p7/releases/site" \
     || fail "phase7: atomic symlink failed"
   if [ "$(readlink "$_p7/releases/site")" != "$_p7/releases/new" ]; then
     fail "phase7: atomic symlink did not replace the live link"
   fi
-  ok "phase7: atomic symlink replaces the live link"
+  for _p7_tmp in "$_p7/releases/old"/site.tmp.*; do
+    if [ -e "$_p7_tmp" ] || [ -L "$_p7_tmp" ]; then
+      fail "phase7: atomic symlink moved a temporary link into the old release"
+    fi
+  done
+  ok "phase7: atomic symlink replaces a directory symlink without polluting the old release"
 
   rm -rf "$_p7"
 }

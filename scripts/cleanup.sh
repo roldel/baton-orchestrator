@@ -24,19 +24,21 @@ fi
 # --- Stop docker stack (nginx + webhook + certbot) ---
 if command -v docker >/dev/null 2>&1 && [ -f "$ORCHESTRATOR_COMPOSE" ]; then
   echo "[cleanup] Stopping orchestrator docker-compose stack..."
-  docker compose -f "$ORCHESTRATOR_COMPOSE" down --remove-orphans --volumes || true
+  . "$BASE_DIR/scripts/tools/helpers/project-network.sh"
+  baton_orchestrator_compose down --remove-orphans --volumes || true
 else
   echo "[cleanup] Skipping docker-compose stack teardown (docker or compose file missing)."
 fi
 
-# --- Remove the dedicated docker network if possible ---
+# --- Remove project networks (baton-<project>) if possible ---
 if command -v docker >/dev/null 2>&1; then
-  if docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-    echo "[cleanup] Attempting to remove docker network: internal_proxy_pass_network"
-    if ! docker network rm internal_proxy_pass_network >/dev/null 2>&1; then
-      echo "[cleanup]   Could not remove internal_proxy_pass_network (likely still in use). Skipping."
+  for _net in $(docker network ls --filter label=baton.project --format '{{.Name}}' 2>/dev/null); do
+    echo "[cleanup] Attempting to remove docker network: $_net"
+    if ! docker network rm "$_net" >/dev/null 2>&1; then
+      echo "[cleanup]   Could not remove $_net (likely still in use by project containers). Skipping."
     fi
-  fi
+  done
+  rm -f "$BASE_DIR/orchestrator/docker-compose.networks.yml"
 fi
 
 # --- OpenRC baton-webhook service cleanup ---

@@ -52,13 +52,20 @@ DOMAIN_ALIASES="$(
     printf '%s' "${DOMAIN_ALIASES:-}"
   fi
 )"
-UPSTREAM="$(
+# proxy_pass may only target the computed baton-<project>. A static site has
+# no upstream, so every proxy_pass is rejected for it.
+STATIC_SITE="$(
   set +eu
   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
   if load_env_safe "$ENV_FILE"; then
-    printf '%s' "${DOCKER_NETWORK_SERVICE_ALIAS:-}"
+    printf '%s' "${STATIC_SITE:-no}"
   fi
 )"
+UPSTREAM=""
+if [ "$STATIC_SITE" != "yes" ]; then
+  . "$BASE_DIR/scripts/tools/helpers/project-network.sh"
+  UPSTREAM="$(baton_upstream_host "$PROJECT")" || exit 1
+fi
 APP_PORT="$(
   set +eu
   . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"

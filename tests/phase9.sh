@@ -13,7 +13,7 @@ phase9_subst() {
   sed \
     -e 's|\${DOMAIN_NAME}|app.example|g' \
     -e 's|\${DOMAIN_ALIASES}|www.app.example|g' \
-    -e 's|\${DOCKER_NETWORK_SERVICE_ALIAS}|app|g' \
+    -e 's|\${UPSTREAM_HOST}|baton-app|g' \
     -e 's|\${APP_PORT}|8000|g' \
     -e 's|\${SITE_KEY}|app.example|g' \
     "$1"
@@ -28,7 +28,7 @@ phase9() {
 
   phase9_subst "$ROOT/example-project/server.conf" > "$_p9/dynamic.conf"
   baton_check_rendered_conf "$_p9/dynamic.conf" app.example "www.app.example" \
-    app.example app 8000 || fail "phase9: dynamic example server.conf was rejected"
+    app.example baton-app 8000 || fail "phase9: dynamic example server.conf was rejected"
   phase9_subst "$ROOT/example-project-static/server.conf" > "$_p9/static.conf"
   baton_check_rendered_conf "$_p9/static.conf" app.example "www.app.example" \
     app.example "" "" || fail "phase9: static example server.conf was rejected"

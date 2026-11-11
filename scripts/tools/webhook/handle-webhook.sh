@@ -211,7 +211,7 @@ if [ "$DOCKER_COMPOSE_RESTART_REQUIRED_NORM" = "YES" ]; then
     if sh "$RESOLVE_HELPER" "$REPO_LOCATION" >>"$LOG" 2>&1; then
         log "Restarting Docker Compose (down and up)"
         sh "$COMPOSE_CMD" "$REPO_LOCATION" down >>"$LOG" 2>&1 || true
-        if sh "$COMPOSE_CMD" "$REPO_LOCATION" up -d --build --force-recreate >>"$LOG" 2>&1; then
+        if sh "$COMPOSE_CMD" "$REPO_LOCATION" --project "$PROJECT" up -d --build --force-recreate >>"$LOG" 2>&1; then
             log "Docker Compose UP OK"
             # proxy_pass hostnames are resolved when nginx loads config. A
             # recreated container keeps the old address until reload. Do not
@@ -230,7 +230,7 @@ if [ "$DOCKER_COMPOSE_RESTART_REQUIRED_NORM" = "YES" ]; then
             log "Docker Compose UP FAILED → restoring previous version and bringing it back up"
             restore_backup
             revert_static_publish
-            if sh "$COMPOSE_CMD" "$REPO_LOCATION" up -d --build --force-recreate >>"$LOG" 2>&1; then
+            if sh "$COMPOSE_CMD" "$REPO_LOCATION" --project "$PROJECT" up -d --build --force-recreate >>"$LOG" 2>&1; then
                 log "Previous version restored and running"
             else
                 log "WARNING: could not bring previous version back up — site may be DOWN, manual intervention required"

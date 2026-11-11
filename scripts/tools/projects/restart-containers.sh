@@ -2,7 +2,8 @@
 # Restart a project's containers using its docker compose file(s).
 # - Resolves compose file(s) via the shared helper (auto-detect or
 #   DOCKER_COMPOSE_FILES in the project's .env)
-# - Runs `docker compose down` then `up -d --build --force-recreate`
+# - Runs `docker compose down` then `up -d --build --force-recreate`; `up`
+#   attaches APP_SERVICE to the project network baton-<project>
 # - Runs from the project directory so .env is picked up automatically
 
 set -eu
@@ -49,6 +50,6 @@ sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
 }
 
 echo "[restart-containers] docker compose up -d --build --force-recreate"
-sh "$COMPOSE_CMD" "$PROJECT_DIR" up -d --build --force-recreate
+sh "$COMPOSE_CMD" "$PROJECT_DIR" --project "$PROJECT" up -d --build --force-recreate
 
 echo "[restart-containers] Restart complete for project: $PROJECT"

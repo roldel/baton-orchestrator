@@ -27,12 +27,11 @@ services:
         # Shared assets for the different projects
         - /srv/shared-files:/srv/shared-files:ro
 
+      # Each project network (baton-<project>) is added by the generated
+      # docker-compose.networks.yml, or attached live by deploy. Map form so
+      # those entries merge with this one.
       networks:
-        # Inter docker compose network
-        - internal_proxy_pass_network
-
-        # Inner docker compose networl
-        - nginx_webhook_network
+        nginx_webhook_network: {}
 
       healthcheck:
         test: ["CMD", "wget", "--spider", "-q", "http://0.0.0.0/health"]
@@ -92,8 +91,5 @@ volumes:
   acme-webroot:
 
 networks:
-  internal_proxy_pass_network:
-    external: true
-
   nginx_webhook_network:
     driver: bridge

@@ -30,7 +30,7 @@ baton_server_conf_extra_vars() {
     # keeps in its own shell. A .env value for one of these would be
     # overwritten or would change the renderer, so it cannot be an extra.
     # Lower-case and set before the load so the .env cannot change the list.
-    _bsce_reserved="PROJECT SITE_KEY DOMAIN_NAME DOMAIN_ALIASES DOMAIN_ADMIN_EMAIL WEBHOOK_URL DOCKER_NETWORK_SERVICE_ALIAS APP_PORT STATIC_SITE SERVER_CONF_EXTRA_VARS BASE_DIR PROJECT_DIR ENV_FILE TEMPLATE TMP_DIR MANDATORY_VARS VARS_TO_SUBSTITUTE EXTRA_VARS TEMP_RENDER LEFTOVER"
+    _bsce_reserved="PROJECT SITE_KEY DOMAIN_NAME DOMAIN_ALIASES DOMAIN_ADMIN_EMAIL WEBHOOK_URL DOCKER_NETWORK_SERVICE_ALIAS UPSTREAM_HOST APP_SERVICE APP_PORT STATIC_SITE SERVER_CONF_EXTRA_VARS BASE_DIR PROJECT_DIR ENV_FILE TEMPLATE TMP_DIR MANDATORY_VARS VARS_TO_SUBSTITUTE EXTRA_VARS TEMP_RENDER LEFTOVER"
     load_env_safe "$_bsce_file" || exit 1
 
     # space, tab, newline — comma is translated to space before the split

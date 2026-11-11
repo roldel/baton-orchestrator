@@ -79,12 +79,15 @@ echo "Ensuring Docker is enabled and running..."
 rc-update add docker default >/dev/null || true
 rc-service docker start || true
 
-# Create network if missing
-if ! docker network inspect internal_proxy_pass_network >/dev/null 2>&1; then
-  echo "Creating Docker network: internal_proxy_pass_network"
-  docker network create internal_proxy_pass_network
-else
-  echo "Network already exists: internal_proxy_pass_network"
+# Each dynamic project gets two networks (baton-<project> and its own compose
+# default). Docker's default address pools hold about 31 networks, so warn
+# when they were never widened. Not changed automatically: it needs a Docker
+# restart and a range that fits this host.
+if ! grep -qs 'default-address-pools' /etc/docker/daemon.json; then
+  echo "WARNING: Docker uses its default address pools (about 31 networks, ~14 baton projects)."
+  echo "         For more projects, add to /etc/docker/daemon.json and restart Docker:"
+  echo '           { "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }'
+  echo "         Pick a base range that doesn't overlap this host's networks."
 fi
 
 # Optional: verify compose v2
@@ -102,10 +105,12 @@ rc-service crond start || true
 # --- Orchestrator Services: Clean Start ---
 ORCHESTRATOR_COMPOSE="$BASE_DIR/orchestrator/docker-compose.yml"
 if [ -f "$ORCHESTRATOR_COMPOSE" ]; then
+  . "$BASE_DIR/scripts/tools/helpers/project-network.sh"
+  baton_network_write_orchestrator_list
   echo "Stopping any existing orchestrator services (clean state)..."
-  docker compose -f "$ORCHESTRATOR_COMPOSE" down --remove-orphans || true
+  baton_orchestrator_compose down --remove-orphans || true
   echo "Starting nginx and webhook..."
-  docker compose -f "$ORCHESTRATOR_COMPOSE" up -d --build nginx webhook
+  baton_orchestrator_compose up -d --build nginx webhook
 else
   echo "ERROR: Missing $ORCHESTRATOR_COMPOSE" >&2
   exit 1

@@ -141,7 +141,12 @@ baton_compose_config_allowed() {
   _cca_log=$(CDPATH= cd -- "$_cca_dir" && pwd) || return 1
   _cca_phys=$(CDPATH= cd -- "$_cca_dir" && pwd -P) || return 1
 
+  _cca_top=
   while IFS= read -r _cca_raw || [ -n "$_cca_raw" ]; do
+    # Top-level section (services, networks, volumes…) of the lines below.
+    case $_cca_raw in
+      [!\ \	#-]*) _cca_top=${_cca_raw%%:*} ;;
+    esac
     _cca_line=${_cca_raw%%#*}
     _cca_line=$(printf '%s' "$_cca_line" | tr '\t' ' ')
     _cca_line=$(baton_cg_trim "$_cca_line")
@@ -157,6 +162,42 @@ baton_compose_config_allowed() {
         return 1
         ;;
     esac
+    # Project networks: only baton attaches external networks (its own
+    # baton-<project>), and names starting with baton- are reserved so no
+    # project can answer for another project's upstream host.
+    if [ "$_cca_top" = networks ]; then
+      case $_cca_line in
+        external:*)
+          _cca_val=$(baton_cg_scalar "${_cca_line#*:}")
+          _cca_val=$(printf '%s' "$_cca_val" | tr '[:upper:]' '[:lower:]')
+          case $_cca_val in
+            false|'') ;;
+            *)
+              echo "[compose-guard] ERROR: external networks are not allowed (baton attaches the project network itself)" >&2
+              return 1
+              ;;
+          esac
+          ;;
+      esac
+    fi
+    case $_cca_line in
+      baton-*)
+        echo "[compose-guard] ERROR: names starting with baton- are reserved: $_cca_line" >&2
+        return 1
+        ;;
+      container_name:*|hostname:*|name:*|-*)
+        case $_cca_line in
+          -*) _cca_val=$(baton_cg_scalar "${_cca_line#-}") ;;
+          *) _cca_val=$(baton_cg_scalar "${_cca_line#*:}") ;;
+        esac
+        case $_cca_val in
+          baton-*)
+            echo "[compose-guard] ERROR: names starting with baton- are reserved: $_cca_line" >&2
+            return 1
+            ;;
+        esac
+        ;;
+    esac
     case $_cca_line in
       privileged:*)
         _cca_val=$(baton_cg_scalar "${_cca_line#*:}")
@@ -168,7 +209,19 @@ baton_compose_config_allowed() {
             ;;
         esac
         ;;
-      network_mode:*|pid:*|ipc:*)
+      network_mode:*)
+        # host and bridge are shared with the rest of the host; container:
+        # borrows a network stack that may belong to another project.
+        _cca_val=$(baton_cg_scalar "${_cca_line#*:}")
+        _cca_val=$(printf '%s' "$_cca_val" | tr '[:upper:]' '[:lower:]')
+        case $_cca_val in
+          host|bridge|container:*)
+            echo "[compose-guard] ERROR: network_mode $_cca_val is not allowed" >&2
+            return 1
+            ;;
+        esac
+        ;;
+      pid:*|ipc:*)
         _cca_key=${_cca_line%%:*}
         _cca_val=$(baton_cg_scalar "${_cca_line#*:}")
         _cca_val=$(printf '%s' "$_cca_val" | tr '[:upper:]' '[:lower:]')

@@ -7,6 +7,7 @@
 #   - Mode         (dynamic / static)
 #   - Site live    (SSL cert present + nginx config installed)
 #   - Containers   (dynamic only: running / stopped / absent)
+#   - Network      (dynamic only: baton-<project> exists and nginx is attached)
 #   - Webhook      (active / inactive)
 #
 # Usage:
@@ -22,6 +23,7 @@ WEBHOOKS_DIR="/srv/baton-orchestrator/webhooks.d"
 CERT_BASE="/etc/letsencrypt/live"
 COMPOSE_CMD="${BATON_COMPOSE_CMD:-$BASE_DIR/scripts/tools/helpers/compose-cmd.sh}"
 RESOLVE_HELPER="$BASE_DIR/scripts/tools/helpers/resolve-compose-files.sh"
+. "$BASE_DIR/scripts/tools/helpers/project-network.sh"
 STATUS_RC=0
 
 # --- Colour / formatting helpers (degrade gracefully if no tty) ---
@@ -76,10 +78,10 @@ else
 fi
 
 # --- Header ---
-# Width: 20+1+32+1+10+1+12+1+14+1+12 = 105
-printf "\n${BOLD}%-20s %-32s %-10s %-12s %-14s %-12s${RESET}\n" \
-    "PROJECT" "HOST" "MODE" "SITE" "CONTAINERS" "WEBHOOK"
-printf '%0.s─' $(seq 1 105); printf '\n'
+# Width: 20+1+32+1+10+1+12+1+14+1+14+1+12 = 120
+printf "\n${BOLD}%-20s %-32s %-10s %-12s %-14s %-14s %-12s${RESET}\n" \
+    "PROJECT" "HOST" "MODE" "SITE" "CONTAINERS" "NETWORK" "WEBHOOK"
+printf '%0.s─' $(seq 1 120); printf '\n'
 
 # --- Per-project loop ---
 for PROJECT in "$@"; do
@@ -198,6 +200,21 @@ EOF
         fi
     fi
 
+    # --- NETWORK column (dynamic only) ---
+    if [ "$STATIC_SITE" = "yes" ]; then
+        NETWORK_COL="$(info 'n/a')"
+    elif ! command -v docker >/dev/null 2>&1; then
+        NETWORK_COL="$(warn 'no docker')"
+    elif ! _st_net="$(baton_upstream_host "$PROJECT" 2>/dev/null)"; then
+        NETWORK_COL="$(fail 'bad name')"
+    elif ! docker network inspect "$_st_net" >/dev/null 2>&1; then
+        NETWORK_COL="$(warn 'absent')"
+    elif baton_network_has_nginx "$_st_net"; then
+        NETWORK_COL="$(ok 'attached')"
+    else
+        NETWORK_COL="$(fail 'no nginx')"
+    fi
+
     # --- WEBHOOK column ---
     WEBHOOK_CONF="$WEBHOOKS_DIR/${DOMAIN_NAME}-webhook.conf"
     if [ -f "$WEBHOOK_CONF" ]; then
@@ -207,12 +224,13 @@ EOF
     fi
 
     # --- Print row ---
-    printf "%-20s %s %b %-2s %b %-2s %b %-2s %b\n" \
+    printf "%-20s %s %b %-2s %b %-2s %b %-2s %b %-2s %b\n" \
         "$PROJECT" \
         "$HOST_COL" \
         "$MODE_COL" "" \
         "$SITE_COL" "" \
         "$CONTAINERS_COL" "" \
+        "$NETWORK_COL" "" \
         "$WEBHOOK_COL"
     if [ "$_st_ps" -ne 0 ] && [ -n "$_st_err" ] && [ -s "$_st_err" ]; then
         cat "$_st_err"
@@ -222,5 +240,5 @@ EOF
     fi
 done
 
-printf '%0.s─' $(seq 1 105); printf '\n\n'
+printf '%0.s─' $(seq 1 120); printf '\n\n'
 exit "$STATUS_RC"

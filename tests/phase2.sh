@@ -16,14 +16,7 @@ phase2() {
   baton_check_app_port 65535 || fail "phase2: APP_PORT 65535 rejected"
   baton_check_app_port 1 || fail "phase2: APP_PORT 1 rejected"
 
-  if baton_check_service_alias 'app;return'; then
-    fail "phase2: service alias payload accepted"
-  fi
-  if baton_check_service_alias '-app'; then
-    fail "phase2: leading-hyphen alias accepted"
-  fi
-  baton_check_service_alias 'myapp-service' || fail "phase2: myapp-service rejected"
-  ok "phase2: port and service alias allowlists"
+  ok "phase2: port allowlist"
 
   baton_check_admin_email 'ops@example.com' || fail "phase2: plain email rejected"
   if baton_check_admin_email 'ops@example.com; }'; then

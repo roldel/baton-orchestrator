@@ -25,22 +25,6 @@ baton_check_app_port() {
   return 0
 }
 
-# Docker network alias: DNS label, no leading hyphen, 1–63 characters.
-baton_check_service_alias() {
-  _bcsa=${1-}
-  case $_bcsa in
-    [A-Za-z0-9]*) ;;
-    *) return 1 ;;
-  esac
-  case $_bcsa in
-    *[!A-Za-z0-9_-]*) return 1 ;;
-  esac
-  if [ "${#_bcsa}" -lt 1 ] || [ "${#_bcsa}" -gt 63 ]; then
-    return 1
-  fi
-  return 0
-}
-
 # Empty is allowed. A non-empty value must be a single addr-spec with a
 # restricted character set so it cannot become an nginx token.
 baton_check_admin_email() {

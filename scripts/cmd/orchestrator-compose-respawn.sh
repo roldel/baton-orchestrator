@@ -6,13 +6,19 @@
 
 set -eu
 
-COMPOSE_FILE="/opt/baton-orchestrator/orchestrator/docker-compose.yml"
+BASE_DIR="/opt/baton-orchestrator"
+. "$BASE_DIR/scripts/tools/helpers/project-network.sh"
+
+# The recreated nginx must join every project network at creation: its
+# conf.d names each project's upstream host, and nginx won't start if one
+# can't be resolved. Refresh the list from the networks that exist first.
+baton_network_write_orchestrator_list
 
 # Tolerated like restart-containers.sh's identical `down` call: a transient
 # failure (busy daemon, network-removal race, a stuck container) must not
 # abort before `up` runs, or the whole orchestrator stack (nginx, webhook
 # listener) stays down until someone notices and reruns this manually.
-docker compose -f "$COMPOSE_FILE" down || {
+baton_orchestrator_compose down || {
   echo "WARNING: docker compose down failed for the orchestrator stack (containers may already be stopped)." >&2
 }
-docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate
+baton_orchestrator_compose up -d --build --force-recreate

@@ -29,6 +29,7 @@ Deploy and manage multiple projects — **containerized apps or static sites** �
 - 🔄 **Webhook support** for push-to-deploy workflows  
 - 🧱 **Daemon-free control logic** — deploy/management is modular shell; the only resident services are the shared NGINX ingress and webhook worker  
 - 🔌 **Strict isolation** between orchestrator, projects, and webhook worker  
+- 🧩 **Per-project networks** — each app runs on its own Docker network shared only with nginx; projects can't reach each other  
 - 🌐 **Subdomain-friendly** — run many projects as subdomains of one domain (a single wildcard DNS record covers unlimited projects)
 - 🗂️ **Static site mode** — serve pre-built sites with no app container at all
 
@@ -75,7 +76,8 @@ This will:
 
 - Install system dependencies  
 - Create internal directories (including `/srv/projects`)  
-- Start the orchestrator's NGINX + webhook worker + Docker network  
+- Start the orchestrator's NGINX + webhook worker  
+- Warn if Docker's address pools are too small for many projects (see [Per-project networks](#per-project-networks))  
 - Install the SSL auto-renewal cron job  
 - Install and start the `baton-webhook` watcher service (OpenRC)  
 
@@ -99,6 +101,7 @@ With setup done, jump to whichever path above matches your project.
 .
 ├── orchestrator/                # Core stack (nginx + webhook + certbot config)
 │   ├── docker-compose.yml
+│   ├── docker-compose.networks.yml  # generated: attaches nginx to every project network (not in git)
 │   ├── nginx/
 │   │   ├── admin-conf.d/
 │   │   └── nginx.conf
@@ -123,6 +126,7 @@ With setup done, jump to whichever path above matches your project.
 │   ├── baton                    # global CLI wrapper, installed to /usr/local/bin/baton by setup.sh
 │   └── setup.sh
 │
+├── docs/design/                  # design notes (e.g. per-project networks)
 ├── example-project/              # dynamic-app reference (container)
 ├── example-project-static/       # static-site reference
 │
@@ -137,7 +141,8 @@ A running app container (Django, Rails, Node, whatever's behind `docker-compose.
 
 **Checklist:**
 - [ ] Point the domain (or subdomain) at your VPS IP — see [Scaling with subdomains](#scaling-with-subdomains-one-domain-many-projects) for the one-wildcard-record setup
-- [ ] Add `.env`, `server.conf`, `docker-compose.yml` to `/srv/projects/<project-name>/`
+- [ ] Pick a project name that is a DNS label: lower-case letters, digits and `-`, up to 57 characters (it becomes the network name `baton-<project-name>`)
+- [ ] Add `.env`, `server.conf`, `docker-compose.yml` to `/srv/projects/<project-name>/`, with `APP_SERVICE` in `.env` naming the compose service nginx proxies to
 - [ ] `./scripts/cmd/deploy.sh <project-name>`
 
 `.env`:
@@ -149,7 +154,7 @@ A running app container (Django, Rails, Node, whatever's behind `docker-compose.
 DOMAIN_NAME=example.com
 DOMAIN_ADMIN_EMAIL=admin@example.com
 APP_PORT=8000
-DOCKER_NETWORK_SERVICE_ALIAS=myapp
+APP_SERVICE=django   # compose service nginx proxies to; baton attaches it to this project's own network
 
 # Optional
 DOMAIN_ALIASES=www.example.com,api.example.com
@@ -265,7 +270,7 @@ server {
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        proxy_pass http://${DOCKER_NETWORK_SERVICE_ALIAS}:${APP_PORT};
+        proxy_pass http://${UPSTREAM_HOST}:${APP_PORT};
     }
 }
 ```
@@ -279,11 +284,8 @@ services:
     #...
     env_file:
       - .env
-    # Needs to be added on a default network to communicate with primary service
-    networks:
-      default: {}
 
-  django: #application server (django,ruby,laravel...)
+  django: #application server (django,ruby,laravel...) — named by APP_SERVICE
     #...
     env_file:
       - .env
@@ -291,21 +293,9 @@ services:
     volumes:
       - /srv/shared-files/${DOMAIN_NAME}/static:/static_files:rw
       - /srv/shared-files/${DOMAIN_NAME}/media:/media:rw
-    # Define networks as follow
-    networks:
-      # Default network to communicate with secondary services
-      default: {}
-      # External network to communicate with main orchestrator docker compose
-      internal_proxy_pass_network:
-        aliases:
-          - ${DOCKER_NETWORK_SERVICE_ALIAS}
-
-# Add network definition in footer
-networks:
-  default: {}
-  internal_proxy_pass_network:
-    external: true
 ```
+
+No networks to declare: baton attaches `APP_SERVICE` to the project's own network and reaches it at `${UPSTREAM_HOST}` (see [Per-project networks](#per-project-networks)). Deploy refuses compose files that declare external networks, `network_mode: host`, `bridge` or `container:…`, or names starting with `baton-`.
 
 ### Frontend build on a dynamic project
 
@@ -317,7 +307,7 @@ location /api/ {
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_pass http://${DOCKER_NETWORK_SERVICE_ALIAS}:${APP_PORT};
+    proxy_pass http://${UPSTREAM_HOST}:${APP_PORT};
 }
 
 location / {
@@ -456,23 +446,52 @@ A single wildcard `A` record makes *every* subdomain resolve to the VPS instantl
 DOMAIN_NAME=test1.example.com
 DOMAIN_ADMIN_EMAIL=you@example.com
 APP_PORT=8000
-DOCKER_NETWORK_SERVICE_ALIAS=test1-app     # ← MUST be unique per project
+APP_SERVICE=web
 ```
 
 Each subdomain project gets its **own** everything: a TLS cert (issued per subdomain via HTTP-01 — the ACME challenge is served for any host, so a freshly-resolving subdomain just works), nginx conf, `/srv/shared-files/<subdomain>/` dir, and webhook routing (matched by `Host`). `deploy.sh`, `webhook-activate.sh`, `stand-down.sh`, and `respawn.sh` all operate per project, unchanged.
 
-**The one gotcha — `DOCKER_NETWORK_SERVICE_ALIAS` must be unique per project.** All app containers share the one external `internal_proxy_pass_network`, and nginx reaches each by `proxy_pass http://<alias>:<port>`. Two projects with the *same* alias would make Docker's DNS round-robin between them — requests for one could land on the other. Give each a distinct alias (`test1-app`, `test2-app`). `APP_PORT` **can** be identical across projects (it's container-internal, reached by alias — nothing is published to the host).
+Projects can reuse the same `APP_SERVICE` name and `APP_PORT`: each app sits on its own network and nginx reaches it at `baton-<project>`, so nothing collides and nothing is published to the host.
 
 **Aliases (`DOMAIN_ALIASES`)** work for subdomains too, but a nested alias like `www.test1.example.com` is two labels deep, so the single-label wildcard does *not* cover it — add an explicit record (e.g. `www.test1.example.com CNAME test1.example.com`). Every name in `DOMAIN_ALIASES` must resolve, or the whole HTTP-01 request fails. A flat single-label alias is already covered by the wildcard.
 
 **Worth knowing:**
 - **Rate limits:** Let's Encrypt caps *new* certificates per registered domain at ~50/week. Each new subdomain is a new cert; aliases are SANs on one cert (essentially free). Spinning up dozens of brand-new subdomains in one week can hit the cap — normal use and renewals don't.
 - **Cert persistence:** `ensure-certs.sh` is idempotent and `stand-down.sh` never deletes certs, so redeploying / standing down / respawning a subdomain **reuses** its existing cert — no revalidation, no rate-limit pressure from churn.
-- **Isolation is logical, not physical:** subdomain projects are independent *sites* (routing, TLS, lifecycle) but co-tenant on one host, one ingress, one webhook worker, and the shared `internal_proxy_pass_network` — so they are **not** network-isolated from each other. They also share the parent domain's fate (registrar, rate limit, and public Certificate-Transparency visibility of every subdomain name). Each `server.conf` template's `if ($host != $ssl_server_name) { return 421; }` guard keeps a request from being decrypted with one project's certificate and then served by a different project's `server` block — add it to any custom `server.conf` that doesn't start from the shipped templates.
+- **Shared host, separate networks:** subdomain projects are independent *sites* (routing, TLS, lifecycle) and each app sits on its own network, but they share one host, one ingress and one webhook worker. They also share the parent domain's fate (registrar, rate limit, and public Certificate-Transparency visibility of every subdomain name). Each `server.conf` template's `if ($host != $ssl_server_name) { return 421; }` guard keeps a request from being decrypted with one project's certificate and then served by a different project's `server` block — add it to any custom `server.conf` that doesn't start from the shipped templates.
+
+### Per-project networks
+
+Each dynamic project's app runs on its own Docker network, `baton-<project>`, shared only with the ingress nginx. Containers in different projects have no network route to each other; nginx is the only bridge.
+
+- **What the project sets:** `APP_SERVICE` in `.env`, naming the compose service nginx proxies to. Nothing in the compose files: baton adds a generated override that attaches that service to `baton-<project>` with the alias `baton-<project>`. The app keeps its own compose default network for its database and for internet access.
+- **`${UPSTREAM_HOST}`** in `server.conf` is `baton-<project>`, computed from the project directory name. It can't be set in `.env`. The project name must therefore be a DNS label: lower-case letters, digits and `-`, up to 57 characters.
+- **Lifecycle:** `deploy` (and every webhook redeploy) creates the network if needed and attaches nginx before Compose `up`. After `up`, baton checks the networks Docker actually attached and takes the project down if any container is on another project's network. `stand-down` deletes the network once nginx no longer serves the project. The network is `--internal`: it only carries nginx-to-app traffic.
+- **Restarting the orchestrator:** `baton orchestrator-respawn` attaches the recreated nginx to every project network through the generated `orchestrator/docker-compose.networks.yml`. Always restart the stack through baton: a plain `docker compose up` on `orchestrator/docker-compose.yml` would recreate nginx without the project networks, and it would fail to start.
+- **Network limit:** each dynamic project uses two networks (baton's and its own compose default). Docker's default address pools hold about 31 networks, so roughly 14 projects. For more, add this to `/etc/docker/daemon.json` and restart Docker (all containers stop briefly, so do it in a maintenance window). Pick a base range that doesn't overlap the host's networks:
+
+  ```json
+  { "default-address-pools": [ { "base": "10.200.0.0/16", "size": 24 } ] }
+  ```
+
+**Upgrading from the shared `internal_proxy_pass_network`.** This is a breaking change. Run the steps in this order and every site keeps working while you move projects one at a time:
+
+1. Pull the new baton into `/opt/baton-orchestrator`. Don't respawn the orchestrator yet: the running nginx keeps its old network until it is recreated. Until a project is moved, don't push to it (or run `baton webhook-deactivate <project>` first), and don't run `rebuild-all`: a webhook redeploy or respawn stops the old containers, then the new checks refuse to start them again.
+2. For each dynamic project:
+   - project directory name: must be a DNS label (lower-case letters, digits, `-`). Rename it if not, and update anything that points at the old path (`REPO_LOCATION`, CI scripts). Certificates and shared files follow `DOMAIN_NAME`, not the directory, so they're unaffected;
+   - compose files: remove `internal_proxy_pass_network` and the alias;
+   - `.env`: add `APP_SERVICE=<service>`, remove `DOCKER_NETWORK_SERVICE_ALIAS`;
+   - `server.conf`: replace `${DOCKER_NETWORK_SERVICE_ALIAS}` with `${UPSTREAM_HOST}`;
+   - `baton respawn <project>`.
+3. When every project is moved: `baton orchestrator-respawn`.
+4. `docker network rm internal_proxy_pass_network`.
+5. Check `baton status`: every dynamic project should show its network as `attached`.
+
+A project that wasn't updated fails at deploy with a message naming what to change, before anything is touched.
 
 ### Extra server.conf variables
 
-`server.conf` is rendered with `envsubst` from a fixed list: `PROJECT`, `SITE_KEY`, `DOMAIN_NAME`, `DOMAIN_ALIASES`, `DOMAIN_ADMIN_EMAIL`, `WEBHOOK_URL`, plus `DOCKER_NETWORK_SERVICE_ALIAS` and `APP_PORT` on dynamic projects. Any other `${NAME}` left in the rendered file stops the deploy with `un-substituted placeholder(s)`. nginx's own variables (`$host`, `$remote_addr`, …) are never touched.
+`server.conf` is rendered with `envsubst` from a fixed list: `PROJECT`, `SITE_KEY`, `DOMAIN_NAME`, `DOMAIN_ALIASES`, `DOMAIN_ADMIN_EMAIL`, `WEBHOOK_URL`, plus `UPSTREAM_HOST` and `APP_PORT` on dynamic projects. Any other `${NAME}` left in the rendered file stops the deploy with `un-substituted placeholder(s)`. nginx's own variables (`$host`, `$remote_addr`, …) are never touched.
 
 A project that needs more can declare them in its `.env`:
 
@@ -484,12 +503,12 @@ PROXY_AUTH_SECRET=4f9c2a7e1b...
 ```nginx
 location / {
     proxy_set_header X-Proxy-Auth "${PROXY_AUTH_SECRET}";
-    proxy_pass http://${DOCKER_NETWORK_SERVICE_ALIAS}:${APP_PORT};
+    proxy_pass http://${UPSTREAM_HOST}:${APP_PORT};
 }
 ```
 
 - List several names with commas (`A,B`) or spaces. The space form must be quoted (`SERVER_CONF_EXTRA_VARS="A B"`), because an unquoted `.env` value ends at the first space.
-- Each name must match `[A-Z_][A-Z0-9_]*` and must not be a built-in name above (or one of the renderer's own variables). It must be set to a non-empty value in the project `.env` itself. A value inherited from the shell environment does not count.
+- Each name must match `[A-Z_][A-Z0-9_]*` and must not be a built-in name above, `APP_SERVICE`, or one of the renderer's own variables. It must be set to a non-empty value in the project `.env` itself. A value inherited from the shell environment does not count.
 - Values are written into the shared nginx config unescaped, so they may not contain whitespace, quotes, `;`, `{`, `}`, `\`, `$` or `#`. Hex or base64 secrets are fine.
 - Values are treated as secrets. Deploy logs show `NAME=(set, hidden)`, and errors name only the variable. The rendered config under `tmp/rendered/` and `orchestrator/nginx/conf.d/` does contain the value, as nginx needs it.
 - `deploy` checks the declaration in its env-validation step and again when rendering. When the key is absent or empty, nothing changes.
@@ -518,14 +537,14 @@ The webhook container runs as uid 65532 and reads each project's `.env`. `setup`
 |----------|-------------|
 | `./scripts/setup.sh` | Initialize orchestrator (Alpine/Linux VPS) |
 | `./scripts/cmd/deploy.sh <project> [--webhook]` | Deploy or update project; `--webhook` also activates its webhook afterward |
-| `./scripts/cmd/stand-down.sh <project>` | Disable project (keeps SSL) |
+| `./scripts/cmd/stand-down.sh <project>` | Disable project: stop containers, remove its nginx config and its network `baton-<project>` (keeps SSL) |
 | `./scripts/cmd/respawn.sh <project>` | Full reset: stand down, redeploy, restore webhook if it was active |
 | `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs or refreshes the webhook route on each project whose `.env` sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose webhook settings are incomplete |
-| `./scripts/cmd/status.sh [project]` | Overview of all projects (host, mode, site, containers, webhook), or a single project. Host is `DOMAIN_NAME` |
+| `./scripts/cmd/status.sh [project]` | Overview of all projects (host, mode, site, containers, network, webhook), or a single project. Host is `DOMAIN_NAME` |
 | `./scripts/cmd/remove-project.sh <project> [--delete-files]` | Remove a project from Baton management; keeps SSL cert and shared files unless `--delete-files` is passed |
 | `./scripts/cmd/webhook-activate.sh <project>` | Add and connect webhook endpoint and redeploy scripts |
 | `./scripts/cmd/webhook-deactivate.sh <project>` | Remove webhook endpoint, disable auto redeploy |
-| `./scripts/cmd/orchestrator-compose-respawn.sh` | Recreate the orchestrator stack (nginx/webhook/certbot) after editing `orchestrator/docker-compose.yml`; brief nginx blip for ALL live projects |
+| `./scripts/cmd/orchestrator-compose-respawn.sh` | Recreate the orchestrator stack (nginx/webhook/certbot) after editing `orchestrator/docker-compose.yml`; the new nginx is attached to every project network. Brief nginx blip for ALL live projects. Use this instead of a plain `docker compose up` on the orchestrator |
 | `./scripts/tools/analytics/report.sh [--since <window>] [--host <host>]` | Simple traffic report from nginx logs (default: last 24h, all hosts) |
 | `./scripts/cleanup.sh` | (irreversible) Remove orchestrator and all configs |
 

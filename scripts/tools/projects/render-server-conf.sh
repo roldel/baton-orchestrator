@@ -168,13 +168,28 @@ SITE_KEY="$(sh "$BASE_DIR/scripts/tools/helpers/compute-site-key.sh" "$PROJECT")
 export SITE_KEY
 echo "[render-server-conf] Static site: $STATIC_SITE (SITE_KEY=$SITE_KEY)" >&2
 
+# --- Upstream host (dynamic only) ---
+# nginx reaches the app at baton-<project> on the project's own network. Baton
+# computes it; a .env can't set it, and the old per-project alias is gone.
+for v in DOCKER_NETWORK_SERVICE_ALIAS UPSTREAM_HOST; do
+  if grep -q "^$v=" "$ENV_FILE"; then
+    echo "[render-server-conf] ERROR: $v is set in $ENV_FILE. Baton now computes the upstream host: remove $v, set APP_SERVICE, and use \${UPSTREAM_HOST} in server.conf." >&2
+    exit 1
+  fi
+done
+if [ "$STATIC_SITE" != "yes" ]; then
+  . "$BASE_DIR/scripts/tools/helpers/project-network.sh"
+  UPSTREAM_HOST="$(baton_upstream_host "$PROJECT")" || exit 1
+  export UPSTREAM_HOST
+fi
+
 # --- Verify mandatory vars ---
 # Ensure this list covers ALL variables in your `server.conf` template that need substitution.
 # Domain vars are always required; the static flag decides whether the app-proxy
 # vars are needed too.
 MANDATORY_VARS="PROJECT DOMAIN_NAME DOMAIN_ADMIN_EMAIL"
 if [ "$STATIC_SITE" != "yes" ]; then
-  MANDATORY_VARS="$MANDATORY_VARS DOCKER_NETWORK_SERVICE_ALIAS APP_PORT"
+  MANDATORY_VARS="$MANDATORY_VARS UPSTREAM_HOST APP_PORT"
 fi
 
 missing=0
@@ -205,10 +220,6 @@ if [ "$STATIC_SITE" != "yes" ]; then
     echo "[render-server-conf] ERROR: APP_PORT must be an integer from 1 to 65535" >&2
     exit 1
   fi
-  if ! baton_check_service_alias "$DOCKER_NETWORK_SERVICE_ALIAS"; then
-    echo "[render-server-conf] ERROR: DOCKER_NETWORK_SERVICE_ALIAS must be a DNS label (letters, digits, '_' or '-', not starting with '-')" >&2
-    exit 1
-  fi
 fi
 
 # --- Project-declared extra variables (optional SERVER_CONF_EXTRA_VARS) ---
@@ -231,7 +242,7 @@ done
 # SERVER_CONF_EXTRA_VARS (see above) instead of editing this list.
 VARS_TO_SUBSTITUTE='${PROJECT} ${SITE_KEY} ${DOMAIN_NAME} ${DOMAIN_ALIASES} ${DOMAIN_ADMIN_EMAIL} ${WEBHOOK_URL}'
 if [ "$STATIC_SITE" != "yes" ]; then
-  VARS_TO_SUBSTITUTE="$VARS_TO_SUBSTITUTE "'${DOCKER_NETWORK_SERVICE_ALIAS} ${APP_PORT}'
+  VARS_TO_SUBSTITUTE="$VARS_TO_SUBSTITUTE "'${UPSTREAM_HOST} ${APP_PORT}'
 fi
 for v in $EXTRA_VARS; do
   VARS_TO_SUBSTITUTE="$VARS_TO_SUBSTITUTE \${$v}"

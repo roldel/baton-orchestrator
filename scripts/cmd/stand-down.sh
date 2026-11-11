@@ -6,6 +6,7 @@
 # - Stop its containers
 # - Remove its nginx server config
 # - Test nginx config and reload, restoring the vhost if that fails
+# - Detach nginx from the project network and delete it (dynamic only)
 
 set -eu
 
@@ -153,6 +154,23 @@ if ! sh "$NGINX_RELOAD"; then
   exit 1
 fi
 
+# nginx no longer references baton-<project>, so the network can go. The
+# project is already down: a failure here is reported, not fatal, and
+# `baton status` shows the leftover network.
+NETWORK_REMOVED=0
+if [ "$STATIC_SITE" != "yes" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[stand-down] WARNING: docker not found; project network not removed" >&2
+  else
+    . "$TOOLS_DIR/helpers/project-network.sh"
+    if baton_network_remove "$PROJECT"; then
+      NETWORK_REMOVED=1
+    else
+      echo "[stand-down] WARNING: could not remove the network for $PROJECT (something outside baton may still be attached)" >&2
+    fi
+  fi
+fi
+
 # The opening quiesce refused a task already in processing/. One claimed
 # after that scan is cancelled here, while this process still holds the lock.
 if ! BATON_QUIESCE_CANCEL_PROCESSING=1 sh "$QUIESCE" "$PROJECT"; then
@@ -174,3 +192,6 @@ else
   echo "             - No nginx server config was installed"
 fi
 echo "             - Nginx reloaded"
+if [ "$NETWORK_REMOVED" -eq 1 ]; then
+  echo "             - Project network removed"
+fi

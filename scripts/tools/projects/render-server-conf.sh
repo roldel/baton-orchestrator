@@ -211,15 +211,31 @@ if [ "$STATIC_SITE" != "yes" ]; then
   fi
 fi
 
+# --- Project-declared extra variables (optional SERVER_CONF_EXTRA_VARS) ---
+# The helper checks each name and value and prints only the names. Values are
+# treated as secrets: never echo them here.
+. "$BASE_DIR/scripts/tools/helpers/server-conf-extra-vars.sh"
+if ! EXTRA_VARS="$(baton_server_conf_extra_vars "$ENV_FILE")"; then
+  echo "[render-server-conf] ❌ Invalid SERVER_CONF_EXTRA_VARS. Aborting." >&2
+  exit 1
+fi
+for v in $EXTRA_VARS; do
+  echo "[render-server-conf] ✅ $v=(set, hidden)" >&2
+done
+
 # --- Define the variables envsubst should process ---
 # This list MUST include every variable placeholder you have in your server.conf template
 # (e.g., ${DOMAIN_NAME}, ${APP_PORT}, etc.)
 # If you add new variables to server.conf, you must add them here and also export them above.
-# Built additively from the static flag.
+# Built additively from the static flag. A project can add its own names with
+# SERVER_CONF_EXTRA_VARS (see above) instead of editing this list.
 VARS_TO_SUBSTITUTE='${PROJECT} ${SITE_KEY} ${DOMAIN_NAME} ${DOMAIN_ALIASES} ${DOMAIN_ADMIN_EMAIL} ${WEBHOOK_URL}'
 if [ "$STATIC_SITE" != "yes" ]; then
   VARS_TO_SUBSTITUTE="$VARS_TO_SUBSTITUTE "'${DOCKER_NETWORK_SERVICE_ALIAS} ${APP_PORT}'
 fi
+for v in $EXTRA_VARS; do
+  VARS_TO_SUBSTITUTE="$VARS_TO_SUBSTITUTE \${$v}"
+done
 
 TEMP_RENDER="$TMP_DIR/${SITE_KEY}.conf"
 

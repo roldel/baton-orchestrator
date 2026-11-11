@@ -63,7 +63,7 @@ if [ "$STATIC_SITE" = "yes" ]; then
 else
   REQUIRED_ENV_VARS="$REQUIRED_ENV_VARS DOCKER_NETWORK_SERVICE_ALIAS APP_PORT"
 fi
-sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" $REQUIRED_ENV_VARS
+sh "$TOOLS_DIR/projects/validate-env.sh" "$PROJECT" --server-conf-extras $REQUIRED_ENV_VARS
 
 # 4) Render server.conf template
 RENDERED_FILE="$(sh "$TOOLS_DIR/projects/render-server-conf.sh" "$PROJECT")"

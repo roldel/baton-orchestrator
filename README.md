@@ -161,6 +161,12 @@ DOMAIN_ALIASES=www.example.com,api.example.com
 # time (commit the build, or build it on the VPS before the first deploy).
 # STATIC_SOURCE_DIR=frontend/build
 
+# Extra ${NAME} placeholders this project's server.conf uses, beyond the
+# built-in ones. Each name must also be set in this file. See
+# "Extra server.conf variables" below.
+# SERVER_CONF_EXTRA_VARS=PROXY_AUTH_SECRET
+# PROXY_AUTH_SECRET=change-me
+
 
 ## WEBHOOK (optional push-to-deploy — see "Webhook auto-deploy" below)
 
@@ -463,6 +469,30 @@ Each subdomain project gets its **own** everything: a TLS cert (issued per subdo
 - **Rate limits:** Let's Encrypt caps *new* certificates per registered domain at ~50/week. Each new subdomain is a new cert; aliases are SANs on one cert (essentially free). Spinning up dozens of brand-new subdomains in one week can hit the cap — normal use and renewals don't.
 - **Cert persistence:** `ensure-certs.sh` is idempotent and `stand-down.sh` never deletes certs, so redeploying / standing down / respawning a subdomain **reuses** its existing cert — no revalidation, no rate-limit pressure from churn.
 - **Isolation is logical, not physical:** subdomain projects are independent *sites* (routing, TLS, lifecycle) but co-tenant on one host, one ingress, one webhook worker, and the shared `internal_proxy_pass_network` — so they are **not** network-isolated from each other. They also share the parent domain's fate (registrar, rate limit, and public Certificate-Transparency visibility of every subdomain name). Each `server.conf` template's `if ($host != $ssl_server_name) { return 421; }` guard keeps a request from being decrypted with one project's certificate and then served by a different project's `server` block — add it to any custom `server.conf` that doesn't start from the shipped templates.
+
+### Extra server.conf variables
+
+`server.conf` is rendered with `envsubst` from a fixed list: `PROJECT`, `SITE_KEY`, `DOMAIN_NAME`, `DOMAIN_ALIASES`, `DOMAIN_ADMIN_EMAIL`, `WEBHOOK_URL`, plus `DOCKER_NETWORK_SERVICE_ALIAS` and `APP_PORT` on dynamic projects. Any other `${NAME}` left in the rendered file stops the deploy with `un-substituted placeholder(s)`. nginx's own variables (`$host`, `$remote_addr`, …) are never touched.
+
+A project that needs more can declare them in its `.env`:
+
+```ini
+SERVER_CONF_EXTRA_VARS=PROXY_AUTH_SECRET
+PROXY_AUTH_SECRET=4f9c2a7e1b...
+```
+
+```nginx
+location / {
+    proxy_set_header X-Proxy-Auth "${PROXY_AUTH_SECRET}";
+    proxy_pass http://${DOCKER_NETWORK_SERVICE_ALIAS}:${APP_PORT};
+}
+```
+
+- List several names with commas (`A,B`) or spaces. The space form must be quoted (`SERVER_CONF_EXTRA_VARS="A B"`), because an unquoted `.env` value ends at the first space.
+- Each name must match `[A-Z_][A-Z0-9_]*` and must not be a built-in name above (or one of the renderer's own variables). It must be set to a non-empty value in the project `.env` itself. A value inherited from the shell environment does not count.
+- Values are written into the shared nginx config unescaped, so they may not contain whitespace, quotes, `;`, `{`, `}`, `\`, `$` or `#`. Hex or base64 secrets are fine.
+- Values are treated as secrets. Deploy logs show `NAME=(set, hidden)`, and errors name only the variable. The rendered config under `tmp/rendered/` and `orchestrator/nginx/conf.d/` does contain the value, as nginx needs it.
+- `deploy` checks the declaration in its env-validation step and again when rendering. When the key is absent or empty, nothing changes.
 
 ### Static sync mechanics
 

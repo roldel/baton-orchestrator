@@ -3,12 +3,21 @@ set -eu
 
 # --- Usage check ---
 if [ $# -lt 2 ]; then
-  echo "Usage: $0 <project-name> <VAR1> [VAR2 VAR3 ...]" >&2
+  echo "Usage: $0 <project-name> [--server-conf-extras] <VAR1> [VAR2 VAR3 ...]" >&2
   exit 1
 fi
 
 PROJECT="$1"
 shift 1   # Remaining args are the list of variables to validate
+
+# --server-conf-extras also checks the names listed in SERVER_CONF_EXTRA_VARS
+# (deploy passes it). Lower-case names: the .env loader can only set
+# upper-case keys, so the project file cannot change these.
+check_extras=0
+if [ "${1:-}" = "--server-conf-extras" ]; then
+  check_extras=1
+  shift 1
+fi
 
 BASE_DIR="/opt/baton-orchestrator"
 PROJECT_DIR="/srv/projects/$PROJECT"
@@ -25,6 +34,8 @@ fi
 # why (a project's own .env sourced directly as shell code is arbitrary
 # command execution the instant an unquoted value contains e.g. `;`).
 . "$BASE_DIR/scripts/tools/helpers/load-env-safe.sh"
+. "$BASE_DIR/scripts/tools/helpers/server-conf-extra-vars.sh"
+env_file=$ENV_FILE
 load_env_safe "$ENV_FILE"
 
 REQUIRED_VARS="$@"
@@ -39,6 +50,15 @@ for v in $REQUIRED_VARS; do
     MISSING=1
   fi
 done
+
+# Names only: extra values are treated as secrets and never printed.
+if [ "$check_extras" -eq 1 ]; then
+  if extra_vars="$(baton_server_conf_extra_vars "$env_file")"; then
+    [ -z "$extra_vars" ] || echo "[validate-env] Checking SERVER_CONF_EXTRA_VARS: $extra_vars"
+  else
+    MISSING=1
+  fi
+fi
 
 if [ "$MISSING" -ne 0 ]; then
   echo "[validate-env] One or more required env vars are missing. Aborting." >&2

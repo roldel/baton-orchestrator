@@ -147,6 +147,20 @@ phase11() {
   baton_network_remove dresskod 2>/dev/null || fail "phase11: removing a missing network failed"
   ok "phase11: remove detaches nginx, deletes the network, refreshes the list"
 
+  baton_network_ensure dresskod 2>/dev/null || fail "phase11: ensure failed"
+  phase11_ctr ingress-nginx orchestrator baton-dresskod "baton-dresskod"
+  : > "$PHASE11_STATE/calls"
+  baton_network_remove dresskod 2>/dev/null || fail "phase11: remove of nginx's primary network failed"
+  [ -d "$PHASE11_STATE/net/baton-dresskod" ] || fail "phase11: nginx's primary network was removed"
+  if grep -q 'network disconnect\|network rm' "$PHASE11_STATE/calls"; then
+    fail "phase11: nginx detached from its primary network"
+  fi
+  rm -rf "$PHASE11_STATE/ctr/ingress-nginx"
+  baton_network_remove dresskod 2>/dev/null || fail "phase11: remove failed"
+  awk '/^  nginx:/{n=1} /^  [a-z]/&&!/^  nginx:/{n=0} n&&/nginx_webhook_network:/{f=1} f&&/priority:/{p=1; exit} END{exit !p}' \
+    "$ROOT/orchestrator/docker-compose.yml" || fail "phase11: nginx_webhook_network is not nginx's primary network"
+  ok "phase11: nginx's primary network is pinned and never removed"
+
   # --- isolation check after up ---
   baton_network_ensure dresskod 2>/dev/null || fail "phase11: ensure failed"
   phase11_net dresskod_default dresskod

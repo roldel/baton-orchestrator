@@ -133,10 +133,22 @@ baton_network_ensure() {
     echo "[project-network] Attaching $BATON_NGINX_CONTAINER to $_bne_net" >&2
     if ! docker network connect "$_bne_net" "$BATON_NGINX_CONTAINER"; then
       echo "[project-network] ERROR: could not attach $BATON_NGINX_CONTAINER to $_bne_net" >&2
+      echo "[project-network] If Docker reports 'could not find a network matching network mode', nginx's primary network was deleted: run 'baton orchestrator-respawn'" >&2
       return 1
     fi
   fi
   baton_network_write_orchestrator_list
+}
+
+# $1 network. True when it is nginx's primary network (HostConfig.NetworkMode,
+# a name or an id). Removing that network breaks every later
+# `docker network connect` to nginx until nginx is recreated.
+baton_network_is_nginx_primary() {
+  _bnip_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$BATON_NGINX_CONTAINER" 2>/dev/null) || return 1
+  [ -n "$_bnip_mode" ] || return 1
+  [ "$_bnip_mode" = "$1" ] && return 0
+  _bnip_id=$(docker network inspect -f '{{.Id}}' "$1" 2>/dev/null) || return 1
+  [ -n "$_bnip_id" ] && [ "$_bnip_mode" = "$_bnip_id" ]
 }
 
 # $1 project. Detach nginx, delete baton-<project>, refresh the list. Returns
@@ -144,6 +156,11 @@ baton_network_ensure() {
 baton_network_remove() {
   _bnr_net=$(baton_upstream_host "$1") || return 1
   _bnr_rc=0
+  if baton_network_is_nginx_primary "$_bnr_net"; then
+    echo "[project-network] WARNING: $_bnr_net is $BATON_NGINX_CONTAINER's primary network; keeping it (run 'baton orchestrator-respawn' to fix)" >&2
+    baton_network_write_orchestrator_list || _bnr_rc=1
+    return "$_bnr_rc"
+  fi
   if docker network inspect "$_bnr_net" >/dev/null 2>&1; then
     if baton_network_has_nginx "$_bnr_net"; then
       docker network disconnect "$_bnr_net" "$BATON_NGINX_CONTAINER" || _bnr_rc=1

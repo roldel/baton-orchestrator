@@ -30,8 +30,13 @@ services:
       # Each project network (baton-<project>) is added by the generated
       # docker-compose.networks.yml, or attached live by deploy. Map form so
       # those entries merge with this one.
+      # priority makes nginx_webhook_network nginx's primary network
+      # (HostConfig.NetworkMode). Otherwise Compose picks the first by name,
+      # a baton-* network; once stand-down removes it, Docker refuses every
+      # later `docker network connect` to nginx until it is recreated.
       networks:
-        nginx_webhook_network: {}
+        nginx_webhook_network:
+          priority: 1000
 
       healthcheck:
         test: ["CMD", "wget", "--spider", "-q", "http://0.0.0.0/health"]

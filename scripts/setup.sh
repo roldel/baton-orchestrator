@@ -68,9 +68,14 @@ echo "  Done."
 
 
 # --- Install baton CLI ---
+# A symlink, not a copy: /usr/local/bin/baton always runs the live script in
+# $BASE_DIR, so a `git pull` there (e.g. a new --no-cache flag) is picked up
+# immediately, with no need to rerun setup.sh to "recopy" it. -f replaces
+# whatever is already at the target, including an old copy from before this
+# became a symlink.
 echo "Installing baton CLI to /usr/local/bin/baton..."
-cp "$BASE_DIR/scripts/baton" /usr/local/bin/baton
-chmod 755 /usr/local/bin/baton
+chmod 755 "$BASE_DIR/scripts/baton"
+ln -sf "$BASE_DIR/scripts/baton" /usr/local/bin/baton
 echo "  Done. You can now run 'baton <command>' from anywhere."
 
 

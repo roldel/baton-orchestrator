@@ -123,7 +123,7 @@ With setup done, jump to whichever path above matches your project.
 │   │   ├── webhook-activate.sh
 │   │   └── webhook-deactivate.sh
 │   ├── tools/                   # helpers, projects, nginx, ssl, webhook, static, analytics
-│   ├── baton                    # global CLI wrapper, installed to /usr/local/bin/baton by setup.sh
+│   ├── baton                    # global CLI wrapper; setup.sh symlinks /usr/local/bin/baton to this file
 │   └── setup.sh
 │
 ├── docs/design/                  # design notes (e.g. per-project networks)
@@ -531,7 +531,7 @@ The webhook container runs as uid 65532 and reads each project's `.env`. `setup`
 
 ## 🧰 Commands Summary
 
-`setup.sh` installs the `baton` CLI to `/usr/local/bin/baton`, so every command below can also be run as `baton <command> [arguments]` from anywhere (e.g. `baton deploy <project> --webhook`, `baton status`). Run `baton help` for the full list.
+`setup.sh` symlinks `/usr/local/bin/baton` to this repo's `scripts/baton`, so every command below can also be run as `baton <command> [arguments]` from anywhere (e.g. `baton deploy <project> --webhook`, `baton status`). Being a symlink (not a copy), it always runs the live script, so a `git pull` in `/opt/baton-orchestrator` is enough to pick up CLI changes — no need to rerun `setup.sh`. Run `baton help` for the full list.
 
 | Command | Description |
 |----------|-------------|

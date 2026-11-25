@@ -25,6 +25,7 @@
 #   baton webhook-activate <project>
 #   baton webhook-deactivate <project>
 #   baton orchestrator-respawn
+#   baton orchestrator-respawn --no-cache
 #   baton setup
 #   baton cleanup
 
@@ -64,7 +65,11 @@ Webhook commands:
   webhook-deactivate <project>           Deactivate webhook for a project
 
 Orchestrator commands:
-  orchestrator-respawn                   Rebuild the orchestrator stack
+  orchestrator-respawn [--no-cache]      Rebuild the orchestrator stack
+                                          (nginx, certbot, webhook).
+                                          --no-cache re-pulls nginx/certbot
+                                          and rebuilds webhook via
+                                          'build --no-cache --pull'
   setup                                  Initialize Baton on this host
   cleanup                                Remove Baton runtime (irreversible)
 

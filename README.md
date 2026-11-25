@@ -544,7 +544,7 @@ The webhook container runs as uid 65532 and reads each project's `.env`. `setup`
 | `./scripts/cmd/remove-project.sh <project> [--delete-files]` | Remove a project from Baton management; keeps SSL cert and shared files unless `--delete-files` is passed |
 | `./scripts/cmd/webhook-activate.sh <project>` | Add and connect webhook endpoint and redeploy scripts |
 | `./scripts/cmd/webhook-deactivate.sh <project>` | Remove webhook endpoint, disable auto redeploy |
-| `./scripts/cmd/orchestrator-compose-respawn.sh` | Recreate the orchestrator stack (nginx/webhook/certbot) after editing `orchestrator/docker-compose.yml`; the new nginx is attached to every project network. Brief nginx blip for ALL live projects. Use this instead of a plain `docker compose up` on the orchestrator |
+| `./scripts/cmd/orchestrator-compose-respawn.sh [--no-cache]` | Recreate the orchestrator stack (nginx/webhook/certbot) after editing `orchestrator/docker-compose.yml`; the new nginx is attached to every project network. Brief nginx blip for ALL live projects. Use this instead of a plain `docker compose up` on the orchestrator. `--no-cache` re-pulls `nginx:alpine` and `certbot/certbot:latest` (plain `up` never re-checks the registry for a newer digest under an already-cached tag) and rebuilds `webhook` via `docker compose build --no-cache --pull` instead of the cached `up --build` |
 | `./scripts/tools/analytics/report.sh [--since <window>] [--host <host>]` | Simple traffic report from nginx logs (default: last 24h, all hosts) |
 | `./scripts/cleanup.sh` | (irreversible) Remove orchestrator and all configs |
 

@@ -4,16 +4,27 @@
 #   DOCKER_COMPOSE_FILES in the project's .env)
 # - Runs `docker compose down` then `up -d --build --force-recreate`; `up`
 #   attaches APP_SERVICE to the project network baton-<project>
+# - With --no-cache: builds first via `docker compose build --no-cache --pull`
+#   (bypasses the layer cache AND re-pulls base images, so a floating base
+#   tag like node:20-slim picks up upstream security patches instead of
+#   reusing whatever was cached locally), then `up -d --force-recreate`
+#   without --build, since the fresh images are already in place.
 # - Runs from the project directory so .env is picked up automatically
 
 set -eu
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <project-name>" >&2
+  echo "Usage: $0 <project-name> [--no-cache]" >&2
   exit 1
 fi
 
 PROJECT="$1"
+shift
+NO_CACHE=0
+if [ "${1:-}" = "--no-cache" ]; then
+  NO_CACHE=1
+  shift
+fi
 
 BASE_DIR="/opt/baton-orchestrator"
 PROJECT_DIR="/srv/projects/$PROJECT"
@@ -49,7 +60,15 @@ sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
   echo "[restart-containers] WARNING: docker compose down failed (containers may already be stopped)." >&2
 }
 
-echo "[restart-containers] docker compose up -d --build --force-recreate"
-sh "$COMPOSE_CMD" "$PROJECT_DIR" --project "$PROJECT" up -d --build --force-recreate
+if [ "$NO_CACHE" -eq 1 ]; then
+  echo "[restart-containers] docker compose build --no-cache --pull"
+  sh "$COMPOSE_CMD" "$PROJECT_DIR" build --no-cache --pull
+
+  echo "[restart-containers] docker compose up -d --force-recreate"
+  sh "$COMPOSE_CMD" "$PROJECT_DIR" --project "$PROJECT" up -d --force-recreate
+else
+  echo "[restart-containers] docker compose up -d --build --force-recreate"
+  sh "$COMPOSE_CMD" "$PROJECT_DIR" --project "$PROJECT" up -d --build --force-recreate
+fi
 
 echo "[restart-containers] Restart complete for project: $PROJECT"

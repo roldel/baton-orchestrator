@@ -8,6 +8,14 @@
 #   3. Deploys fresh (down → up --build --force-recreate, or re-syncs static files)
 #   4. Restores webhook if it was active
 #
+# Plain --build reuses Docker's local layer cache, and if a base image tag
+# (e.g. node:20-slim) already exists locally, `up --build` never re-checks
+# the registry for a newer digest under that tag — so a project pinned to a
+# floating version to pick up security fixes won't actually get them. Pass
+# --no-cache to instead build via `docker compose build --no-cache --pull`
+# (bypasses the layer cache AND re-pulls base images) before `up --force-recreate`,
+# guaranteeing every project is rebuilt from fresh, uncached layers.
+#
 # With --activate-webhooks, each successful respawn is followed by
 # webhook-activate.sh when the project's .env already has DOMAIN_NAME,
 # WEBHOOK_URL, and PAYLOAD_SIGNATURE and the nginx snippet is absent.
@@ -18,6 +26,7 @@
 #   ./scripts/cmd/rebuild-all.sh                      # all projects
 #   ./scripts/cmd/rebuild-all.sh --mode dynamic        # dynamic projects only
 #   ./scripts/cmd/rebuild-all.sh --mode static         # static projects only
+#   ./scripts/cmd/rebuild-all.sh --no-cache            # cache-free rebuild, re-pull base images
 #   ./scripts/cmd/rebuild-all.sh --dry-run             # print what would run, do nothing
 #   ./scripts/cmd/rebuild-all.sh --mode dynamic --dry-run
 #   ./scripts/cmd/rebuild-all.sh --activate-webhooks
@@ -34,6 +43,7 @@ WEBHOOKS_DIR="/srv/baton-orchestrator/webhooks.d"
 MODE_FILTER=""
 DRY_RUN=0
 ACTIVATE_WEBHOOKS=0
+NO_CACHE=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -50,13 +60,17 @@ while [ "$#" -gt 0 ]; do
             ACTIVATE_WEBHOOKS=1
             shift
             ;;
+        --no-cache)
+            NO_CACHE=1
+            shift
+            ;;
         --dry-run)
             DRY_RUN=1
             shift
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--mode dynamic|static] [--activate-webhooks] [--dry-run]
+Usage: $0 [--mode dynamic|static] [--activate-webhooks] [--no-cache] [--dry-run]
 
 Force a full respawn of all Baton-managed projects.
 
@@ -66,6 +80,12 @@ Options:
                           when DOMAIN_NAME, WEBHOOK_URL, and PAYLOAD_SIGNATURE
                           are set and the nginx snippet is not already installed.
                           Projects with incomplete webhook settings are skipped.
+  --no-cache              Rebuild every dynamic project's images via
+                          `docker compose build --no-cache --pull` instead of
+                          the cached `up --build`, so floating base image
+                          tags (e.g. node:20-slim) are re-pulled fresh instead
+                          of reusing a stale local layer. Slower; use this to
+                          pick up upstream security patches.
   --dry-run               Print what would be rebuilt without doing anything
   -h, --help              Show this help
 EOF
@@ -200,6 +220,11 @@ if [ "$ACTIVATE_WEBHOOKS" -eq 1 ]; then
 else
     echo " Webhooks  : preserve existing only"
 fi
+if [ "$NO_CACHE" -eq 1 ]; then
+    echo " Cache     : disabled — no-cache build, re-pulling base images"
+else
+    echo " Cache     : normal (cached build)"
+fi
 [ "$DRY_RUN" -eq 1 ]  && echo " Dry run   : YES — no changes will be made"
 echo "------------------------------------------------------"
 for PROJECT in "$@"; do
@@ -241,7 +266,14 @@ for PROJECT in "$@"; do
     echo " Rebuilding: $PROJECT"
     echo "======================================================"
 
-    if sh "$CMD_DIR/respawn.sh" "$PROJECT"; then
+    RESPAWN_RC=0
+    if [ "$NO_CACHE" -eq 1 ]; then
+        sh "$CMD_DIR/respawn.sh" "$PROJECT" --no-cache || RESPAWN_RC=1
+    else
+        sh "$CMD_DIR/respawn.sh" "$PROJECT" || RESPAWN_RC=1
+    fi
+
+    if [ "$RESPAWN_RC" -eq 0 ]; then
         echo "[rebuild-all] ✅ $PROJECT — OK"
         SUCCEEDED="$SUCCEEDED$PROJECT$NL"
 

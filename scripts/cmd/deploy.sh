@@ -5,21 +5,31 @@
 # Usage:
 #   ./scripts/cmd/deploy.sh <project-name>
 #   ./scripts/cmd/deploy.sh <project-name> --webhook   # also activate webhook after deploy
+#   ./scripts/cmd/deploy.sh <project-name> --no-cache  # rebuild images cache-free, re-pulling base images
 set -eu
 
 # --- Collect project name ---
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <project-name> [--webhook]" >&2
+    echo "Usage: $0 <project-name> [--webhook] [--no-cache]" >&2
     exit 1
 fi
 
 PROJECT="$1"
-ACTIVATE_WEBHOOK=0
-[ "${2:-}" = "--webhook" ] && ACTIVATE_WEBHOOK=1
 
 BASE_DIR="/opt/baton-orchestrator"
 . "$BASE_DIR/scripts/tools/webhook/lock-lib.sh"
 baton_hold_webhook_lock "$@"
+
+shift
+ACTIVATE_WEBHOOK=0
+NO_CACHE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --webhook) ACTIVATE_WEBHOOK=1; shift ;;
+        --no-cache) NO_CACHE=1; shift ;;
+        *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
 
 PROJECT_DIR="/srv/projects/$PROJECT"
 
@@ -97,7 +107,9 @@ if [ "$STATIC_SITE" = "yes" ] || [ -n "$STATIC_SOURCE_DIR" ]; then
 fi
 
 if [ "$STATIC_SITE" != "yes" ]; then
-  if ! sh "$TOOLS_DIR/projects/restart-containers.sh" "$PROJECT"; then
+  set -- "$PROJECT"
+  [ "$NO_CACHE" -eq 1 ] && set -- "$@" --no-cache
+  if ! sh "$TOOLS_DIR/projects/restart-containers.sh" "$@"; then
     if [ -n "$PREV_STATIC_RELEASE" ] && [ -n "$STATIC_SITE_LINK" ]; then
       . "$TOOLS_DIR/static/publish-lib.sh"
       baton_atomic_symlink "$PREV_STATIC_RELEASE" "$STATIC_SITE_LINK"

@@ -536,10 +536,10 @@ The webhook container runs as uid 65532 and reads each project's `.env`. `setup`
 | Command | Description |
 |----------|-------------|
 | `./scripts/setup.sh` | Initialize orchestrator (Alpine/Linux VPS) |
-| `./scripts/cmd/deploy.sh <project> [--webhook]` | Deploy or update project; `--webhook` also activates its webhook afterward |
+| `./scripts/cmd/deploy.sh <project> [--webhook] [--no-cache]` | Deploy or update project; `--webhook` also activates its webhook afterward; `--no-cache` rebuilds images via `docker compose build --no-cache --pull` (bypasses the layer cache and re-pulls base images) instead of the cached `up --build` |
 | `./scripts/cmd/stand-down.sh <project>` | Disable project: stop containers, remove its nginx config and its network `baton-<project>` (keeps SSL) |
-| `./scripts/cmd/respawn.sh <project>` | Full reset: stand down, redeploy, restore webhook if it was active |
-| `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs or refreshes the webhook route on each project whose `.env` sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose webhook settings are incomplete |
+| `./scripts/cmd/respawn.sh <project> [--no-cache]` | Full reset: stand down, redeploy, restore webhook if it was active. `--no-cache` forwards to deploy for a cache-free, freshly-pulled rebuild |
+| `./scripts/cmd/rebuild-all.sh [--mode dynamic\|static] [--activate-webhooks] [--no-cache] [--dry-run]` | Respawn all projects, optionally filtered by mode. `--activate-webhooks` installs or refreshes the webhook route on each project whose `.env` sets `DOMAIN_NAME`, `WEBHOOK_URL`, and `PAYLOAD_SIGNATURE`, and skips projects whose webhook settings are incomplete. `--no-cache` rebuilds every dynamic project from scratch — `docker compose build --no-cache --pull` instead of the cached `up --build` — so floating base image tags (e.g. `node:20-slim`) actually pick up upstream security patches instead of reusing whatever was cached locally |
 | `./scripts/cmd/status.sh [project]` | Overview of all projects (host, mode, site, containers, network, webhook), or a single project. Host is `DOMAIN_NAME` |
 | `./scripts/cmd/remove-project.sh <project> [--delete-files]` | Remove a project from Baton management; keeps SSL cert and shared files unless `--delete-files` is passed |
 | `./scripts/cmd/webhook-activate.sh <project>` | Add and connect webhook endpoint and redeploy scripts |

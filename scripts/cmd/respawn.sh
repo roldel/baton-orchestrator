@@ -6,11 +6,16 @@
 # 2. Stands down the project (stops containers, removes nginx config)
 # 3. Deploys the project (starts containers, renders config, ensures SSL)
 # 4. Reactivates webhook if it was previously active
+#
+# With --no-cache, the deploy phase rebuilds images via
+# `docker compose build --no-cache --pull` instead of the cached `up --build`
+# — bypassing the layer cache and re-pulling base images, so a floating base
+# tag picks up upstream security patches instead of reusing a stale local copy.
 
 set -eu
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <project-name>" >&2
+    echo "Usage: $0 <project-name> [--no-cache]" >&2
     exit 1
 fi
 
@@ -18,6 +23,14 @@ PROJECT="$1"
 BASE_DIR="/opt/baton-orchestrator"
 . "$BASE_DIR/scripts/tools/webhook/lock-lib.sh"
 baton_hold_webhook_lock "$@"
+
+shift
+NO_CACHE=0
+if [ "${1:-}" = "--no-cache" ]; then
+    NO_CACHE=1
+    shift
+fi
+
 PROJECT_DIR="/srv/projects/$PROJECT"
 WEBHOOK_CONF_DIR="/srv/baton-orchestrator/webhooks.d"
 
@@ -65,7 +78,9 @@ fi
 # 4. Execute Deploy
 echo "------------------------------------------------------------"
 echo "[respawn] Phase 2: Deploying"
-sh "$CMD_DIR/deploy.sh" "$PROJECT"
+set -- "$PROJECT"
+[ "$NO_CACHE" -eq 1 ] && set -- "$@" --no-cache
+sh "$CMD_DIR/deploy.sh" "$@"
 
 # 5. Restore Webhook (if previously active)
 if [ "$RESTORE_WEBHOOK" = "yes" ]; then

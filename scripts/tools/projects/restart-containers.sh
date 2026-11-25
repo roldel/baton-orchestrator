@@ -4,11 +4,16 @@
 #   DOCKER_COMPOSE_FILES in the project's .env)
 # - Runs `docker compose down` then `up -d --build --force-recreate`; `up`
 #   attaches APP_SERVICE to the project network baton-<project>
-# - With --no-cache: builds first via `docker compose build --no-cache --pull`
-#   (bypasses the layer cache AND re-pulls base images, so a floating base
-#   tag like node:20-slim picks up upstream security patches instead of
+# - With --no-cache: re-pulls every service declared via `image:` (a db,
+#   cache, or other sidecar with no Dockerfile of its own — `build` below
+#   never touches these, so without this they'd keep whatever was cached
+#   locally under that tag), then builds via `docker compose build --no-cache
+#   --pull` (bypasses the layer cache AND re-pulls base images, so a floating
+#   base tag like node:20-slim picks up upstream security patches instead of
 #   reusing whatever was cached locally), then `up -d --force-recreate`
 #   without --build, since the fresh images are already in place.
+#   --ignore-buildable requires Docker Compose v2.22+ (Oct 2023); on an older
+#   compose, upgrade the docker-cli-compose package first.
 # - Runs from the project directory so .env is picked up automatically
 
 set -eu
@@ -61,6 +66,9 @@ sh "$COMPOSE_CMD" "$PROJECT_DIR" down || {
 }
 
 if [ "$NO_CACHE" -eq 1 ]; then
+  echo "[restart-containers] docker compose pull --ignore-buildable (image-only services, e.g. a db/cache sidecar)"
+  sh "$COMPOSE_CMD" "$PROJECT_DIR" pull --ignore-buildable
+
   echo "[restart-containers] docker compose build --no-cache --pull"
   sh "$COMPOSE_CMD" "$PROJECT_DIR" build --no-cache --pull
 

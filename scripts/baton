@@ -13,19 +13,19 @@
 #   baton stand-down <project>
 #   baton respawn <project>
 #   baton respawn <project> --no-cache
-#   baton rebuild-all
+#   baton rebuild-all                  # cache-free by default
+#   baton rebuild-all --use-cache      # fast, cached rebuild instead
 #   baton rebuild-all --mode dynamic --dry-run
 #   baton rebuild-all --activate-webhooks
 #   baton rebuild-all --activate-webhooks --dry-run
-#   baton rebuild-all --no-cache
 #   baton status
 #   baton status <project>
 #   baton remove-project <project>
 #   baton remove-project <project> --delete-files
 #   baton webhook-activate <project>
 #   baton webhook-deactivate <project>
-#   baton orchestrator-respawn
-#   baton orchestrator-respawn --no-cache
+#   baton orchestrator-respawn         # cache-free by default
+#   baton orchestrator-respawn --use-cache
 #   baton setup
 #   baton cleanup
 
@@ -49,13 +49,12 @@ Project commands:
                                           cache and re-pulling base images
   stand-down <project>                   Disable a project (keeps SSL)
   respawn <project> [--no-cache]         Full stop → rebuild → redeploy
-  rebuild-all [--mode dynamic|static]    Respawn all projects
-               [--activate-webhooks]
-               [--no-cache]              Cache-free rebuild + re-pulled base
-                                          images, so floating base tags
-                                          (e.g. node:20-slim) pick up
-                                          upstream security patches
-               [--dry-run]
+  rebuild-all [--mode dynamic|static]    Respawn all projects. Cache-free by
+               [--activate-webhooks]     default — re-pulls base images so
+               [--use-cache]             floating tags (e.g. node:20-slim)
+               [--dry-run]               pick up upstream security patches.
+                                          --use-cache falls back to the fast,
+                                          cached rebuild (prototyping, etc.)
   status [project]                       Show status of all (or one) project(s)
   remove-project <project>               Remove a project from Baton
                  [--delete-files]
@@ -65,11 +64,13 @@ Webhook commands:
   webhook-deactivate <project>           Deactivate webhook for a project
 
 Orchestrator commands:
-  orchestrator-respawn [--no-cache]      Rebuild the orchestrator stack
+  orchestrator-respawn [--use-cache]     Rebuild the orchestrator stack
                                           (nginx, certbot, webhook).
-                                          --no-cache re-pulls nginx/certbot
-                                          and rebuilds webhook via
-                                          'build --no-cache --pull'
+                                          Cache-free by default: re-pulls
+                                          nginx/certbot and rebuilds webhook
+                                          via 'build --no-cache --pull'.
+                                          --use-cache falls back to the fast,
+                                          cached rebuild
   setup                                  Initialize Baton on this host
   cleanup                                Remove Baton runtime (irreversible)
 

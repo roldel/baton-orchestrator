@@ -8,13 +8,16 @@
 #   3. Deploys fresh (down → up --build --force-recreate, or re-syncs static files)
 #   4. Restores webhook if it was active
 #
-# Plain --build reuses Docker's local layer cache, and if a base image tag
-# (e.g. node:20-slim) already exists locally, `up --build` never re-checks
-# the registry for a newer digest under that tag — so a project pinned to a
-# floating version to pick up security fixes won't actually get them. Pass
-# --no-cache to instead build via `docker compose build --no-cache --pull`
-# (bypasses the layer cache AND re-pulls base images) before `up --force-recreate`,
-# guaranteeing every project is rebuilt from fresh, uncached layers.
+# The whole point of this command is to catch up on security fixes in base
+# images pinned to a floating tag (e.g. node:20-slim), so it defaults to a
+# cache-free rebuild: `docker compose build --no-cache --pull` (bypasses the
+# layer cache AND re-pulls base images) before `up --force-recreate`, for
+# every project. This also re-pulls any `image:`-only sidecar (a db, cache,
+# etc. with no Dockerfile of its own — `build` never touches those) via
+# `docker compose pull --ignore-buildable`, so a project's whole stack ends
+# up fresh, not just its own built image. Pass --use-cache to fall back to
+# the fast, cached `up --build` instead — e.g. for a quick fast-iteration/
+# prototyping pass where you don't need a fresh pull across the whole fleet.
 #
 # With --activate-webhooks, each successful respawn is followed by
 # webhook-activate.sh when the project's .env already has DOMAIN_NAME,
@@ -23,10 +26,10 @@
 # (respawn already restored it).
 #
 # Usage:
-#   ./scripts/cmd/rebuild-all.sh                      # all projects
+#   ./scripts/cmd/rebuild-all.sh                      # all projects, cache-free (default)
 #   ./scripts/cmd/rebuild-all.sh --mode dynamic        # dynamic projects only
 #   ./scripts/cmd/rebuild-all.sh --mode static         # static projects only
-#   ./scripts/cmd/rebuild-all.sh --no-cache            # cache-free rebuild, re-pull base images
+#   ./scripts/cmd/rebuild-all.sh --use-cache           # fast cached rebuild, skip the fresh pull
 #   ./scripts/cmd/rebuild-all.sh --dry-run             # print what would run, do nothing
 #   ./scripts/cmd/rebuild-all.sh --mode dynamic --dry-run
 #   ./scripts/cmd/rebuild-all.sh --activate-webhooks
@@ -43,7 +46,7 @@ WEBHOOKS_DIR="/srv/baton-orchestrator/webhooks.d"
 MODE_FILTER=""
 DRY_RUN=0
 ACTIVATE_WEBHOOKS=0
-NO_CACHE=0
+USE_CACHE=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -60,8 +63,13 @@ while [ "$#" -gt 0 ]; do
             ACTIVATE_WEBHOOKS=1
             shift
             ;;
+        --use-cache)
+            USE_CACHE=1
+            shift
+            ;;
         --no-cache)
-            NO_CACHE=1
+            # Cache-free is already the default; accepted as an explicit no-op.
+            USE_CACHE=0
             shift
             ;;
         --dry-run)
@@ -70,9 +78,15 @@ while [ "$#" -gt 0 ]; do
             ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--mode dynamic|static] [--activate-webhooks] [--no-cache] [--dry-run]
+Usage: $0 [--mode dynamic|static] [--activate-webhooks] [--use-cache] [--dry-run]
 
 Force a full respawn of all Baton-managed projects.
+
+By default, every project is rebuilt cache-free: 'docker compose build
+--no-cache --pull' instead of the cached 'up --build', so floating base
+image tags (e.g. node:20-slim) are re-pulled fresh instead of reusing a
+stale local layer. This is slower but guarantees upstream security patches
+are picked up.
 
 Options:
   --mode dynamic|static   Only process projects of the given deploy mode
@@ -80,12 +94,10 @@ Options:
                           when DOMAIN_NAME, WEBHOOK_URL, and PAYLOAD_SIGNATURE
                           are set and the nginx snippet is not already installed.
                           Projects with incomplete webhook settings are skipped.
-  --no-cache              Rebuild every dynamic project's images via
-                          'docker compose build --no-cache --pull' instead of
-                          the cached 'up --build', so floating base image
-                          tags (e.g. node:20-slim) are re-pulled fresh instead
-                          of reusing a stale local layer. Slower; use this to
-                          pick up upstream security patches.
+  --use-cache             Skip the cache-free rebuild and use the ordinary
+                          cached 'up --build' instead. Faster, but may keep
+                          stale base image layers — use for fast iteration
+                          or prototyping, not for a real security refresh.
   --dry-run               Print what would be rebuilt without doing anything
   -h, --help              Show this help
 EOF
@@ -220,10 +232,10 @@ if [ "$ACTIVATE_WEBHOOKS" -eq 1 ]; then
 else
     echo " Webhooks  : preserve existing only"
 fi
-if [ "$NO_CACHE" -eq 1 ]; then
-    echo " Cache     : disabled — no-cache build, re-pulling base images"
+if [ "$USE_CACHE" -eq 1 ]; then
+    echo " Cache     : enabled (cached build) — via --use-cache"
 else
-    echo " Cache     : normal (cached build)"
+    echo " Cache     : disabled (default) — no-cache build, re-pulling base images"
 fi
 [ "$DRY_RUN" -eq 1 ]  && echo " Dry run   : YES — no changes will be made"
 echo "------------------------------------------------------"
@@ -267,10 +279,10 @@ for PROJECT in "$@"; do
     echo "======================================================"
 
     RESPAWN_RC=0
-    if [ "$NO_CACHE" -eq 1 ]; then
-        sh "$CMD_DIR/respawn.sh" "$PROJECT" --no-cache || RESPAWN_RC=1
-    else
+    if [ "$USE_CACHE" -eq 1 ]; then
         sh "$CMD_DIR/respawn.sh" "$PROJECT" || RESPAWN_RC=1
+    else
+        sh "$CMD_DIR/respawn.sh" "$PROJECT" --no-cache || RESPAWN_RC=1
     fi
 
     if [ "$RESPAWN_RC" -eq 0 ]; then

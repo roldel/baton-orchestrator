@@ -81,8 +81,8 @@ Options:
                           are set and the nginx snippet is not already installed.
                           Projects with incomplete webhook settings are skipped.
   --no-cache              Rebuild every dynamic project's images via
-                          `docker compose build --no-cache --pull` instead of
-                          the cached `up --build`, so floating base image
+                          'docker compose build --no-cache --pull' instead of
+                          the cached 'up --build', so floating base image
                           tags (e.g. node:20-slim) are re-pulled fresh instead
                           of reusing a stale local layer. Slower; use this to
                           pick up upstream security patches.

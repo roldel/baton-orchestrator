@@ -9,12 +9,15 @@
 # Examples:
 #   baton deploy <project>
 #   baton deploy <project> --webhook
+#   baton deploy <project> --no-cache
 #   baton stand-down <project>
 #   baton respawn <project>
+#   baton respawn <project> --no-cache
 #   baton rebuild-all
 #   baton rebuild-all --mode dynamic --dry-run
 #   baton rebuild-all --activate-webhooks
 #   baton rebuild-all --activate-webhooks --dry-run
+#   baton rebuild-all --no-cache
 #   baton status
 #   baton status <project>
 #   baton remove-project <project>
@@ -38,10 +41,19 @@ Usage: baton <command> [arguments]
 
 Project commands:
   deploy <project> [--webhook]           Deploy or update a project
+          [--no-cache]                   --no-cache rebuilds images via
+                                          'docker compose build --no-cache
+                                          --pull' instead of the cached
+                                          'up --build', bypassing the layer
+                                          cache and re-pulling base images
   stand-down <project>                   Disable a project (keeps SSL)
-  respawn <project>                      Full stop → rebuild → redeploy
+  respawn <project> [--no-cache]         Full stop → rebuild → redeploy
   rebuild-all [--mode dynamic|static]    Respawn all projects
                [--activate-webhooks]
+               [--no-cache]              Cache-free rebuild + re-pulled base
+                                          images, so floating base tags
+                                          (e.g. node:20-slim) pick up
+                                          upstream security patches
                [--dry-run]
   status [project]                       Show status of all (or one) project(s)
   remove-project <project>               Remove a project from Baton
